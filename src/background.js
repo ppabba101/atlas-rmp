@@ -1,0 +1,196 @@
+// MV3 module compatibility note: This service worker uses ES modules ("type": "module" in manifest).
+// If Chrome rejects with a module-related error on load, fallback options are:
+//   (a) Switch to non-module worker + use importScripts() at top
+//   (b) Bundle lib/* into a single file via esbuild/webpack
+// Try modules first; only fall back if it actually breaks. See open-questions.md item 3.
+
+import {
+  gql,
+  SCHOOL_SEARCH_QUERY,
+  TEACHER_SEARCH_QUERY,
+  SCHOOL_QUERY_TEXT,
+} from "./lib/rmp.js";
+import { pickBestMatch, splitName, normalize } from "./lib/nameMatch.js";
+import { getCached, setCached } from "./lib/cache.js";
+
+const SCHOOL_ID_KEY = "rmp:schoolId";
+
+// Module-scope promise lock: prevents concurrent startups from firing duplicate
+// school-search requests before the first response is cached.
+let schoolIdPromise = null;
+
+/**
+ * Resolve and cache the UMich Ann Arbor school ID from RMP.
+ * Prefers the Ann Arbor result when multiple schools match.
+ * Uses a promise lock so concurrent callers share a single in-flight request.
+ *
+ * @returns {Promise<string>} RMP school GraphQL ID
+ */
+function getSchoolId() {
+  if (schoolIdPromise) return schoolIdPromise;
+  schoolIdPromise = (async () => {
+    try {
+      const cached = await getCached(SCHOOL_ID_KEY);
+      if (cached) {
+        console.log("[atlas-rmp] School ID from cache:", cached);
+        return cached;
+      }
+
+      console.log("[atlas-rmp] Fetching UMich school ID from RMP...");
+      const data = await gql(SCHOOL_SEARCH_QUERY, {
+        query: { text: SCHOOL_QUERY_TEXT },
+      });
+      const edges = data?.data?.newSearch?.schools?.edges ?? [];
+
+      if (edges.length === 0) {
+        throw new Error("No schools returned from RMP for query: " + SCHOOL_QUERY_TEXT);
+      }
+
+      // Prefer Ann Arbor result; fall back to first result
+      const annArborEdge =
+        edges.find(
+          (e) =>
+            (e.node.city ?? "").toLowerCase().includes("ann arbor") ||
+            (e.node.name ?? "").toLowerCase().includes("ann arbor")
+        ) ?? edges[0];
+
+      const schoolId = annArborEdge.node.id;
+      console.log(
+        "[atlas-rmp] Resolved school ID:",
+        schoolId,
+        "legacyId:",
+        annArborEdge.node.legacyId
+      );
+
+      await setCached(SCHOOL_ID_KEY, schoolId);
+      return schoolId;
+    } catch (e) {
+      schoolIdPromise = null; // allow retry on failure
+      throw e;
+    }
+  })();
+  return schoolIdPromise;
+}
+
+/**
+ * Look up a professor on RMP by full name.
+ * Uses negative caching: a miss is stored so we don't re-query for 7 days.
+ *
+ * @param {string} fullName
+ * @returns {Promise<object>} Result object for sendResponse
+ */
+async function lookupProfessor(fullName) {
+  const cacheKey = "prof:" + fullName.toLowerCase().trim();
+
+  const cached = await getCached(cacheKey);
+  if (cached !== null) {
+    console.log("[atlas-rmp] Cache hit for:", fullName, cached);
+    return cached;
+  }
+
+  console.log("[atlas-rmp] Looking up:", fullName);
+
+  let schoolId;
+  try {
+    schoolId = await getSchoolId();
+  } catch (e) {
+    if (e.code === "auth-failed") {
+      return { found: false, reason: "auth-failed" };
+    }
+    console.error("[atlas-rmp] Failed to get school ID:", e);
+    return { found: false, reason: "error", message: e.message };
+  }
+
+  const { last } = splitName(normalize(fullName));
+  if (!last) {
+    return { found: false, reason: "invalid-name" };
+  }
+
+  let data;
+  try {
+    data = await gql(TEACHER_SEARCH_QUERY, {
+      query: { text: last, schoolID: schoolId },
+    });
+  } catch (e) {
+    if (e.code === "auth-failed") {
+      return { found: false, reason: "auth-failed" };
+    }
+    console.error("[atlas-rmp] Teacher search failed:", e);
+    return { found: false, reason: "error", message: e.message };
+  }
+
+  const edges = data?.data?.newSearch?.teachers?.edges ?? [];
+  console.log(
+    "[atlas-rmp] Teacher search for",
+    fullName,
+    "returned",
+    edges.length,
+    "results"
+  );
+
+  const match = pickBestMatch(fullName, edges);
+
+  if (!match) {
+    console.log("[atlas-rmp] No match found for:", fullName);
+    const missResult = { found: false, reason: "no-match" };
+    await setCached(cacheKey, missResult);
+    return missResult;
+  }
+
+  console.log(
+    "[atlas-rmp] Match found for",
+    fullName,
+    "->",
+    match.node.firstName,
+    match.node.lastName,
+    "confidence:",
+    match.confidence
+  );
+
+  const result = {
+    found: true,
+    confidence: match.confidence,
+    firstName: match.node.firstName,
+    lastName: match.node.lastName,
+    department: match.node.department,
+    avgRating: match.node.avgRating,
+    avgDifficulty: match.node.avgDifficulty,
+    numRatings: match.node.numRatings,
+    wouldTakeAgainPercent: match.node.wouldTakeAgainPercent,
+    legacyId: match.node.legacyId,
+    rmpUrl:
+      "https://www.ratemyprofessors.com/professor/" + match.node.legacyId,
+  };
+
+  await setCached(cacheKey, result);
+  return result;
+}
+
+// Message listener: handles {type: "LOOKUP", name} from content.js
+// Returns true to indicate async sendResponse
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type !== "LOOKUP") return false;
+
+  const { name } = message;
+  if (!name) {
+    sendResponse({ found: false, reason: "no-name" });
+    return true;
+  }
+
+  lookupProfessor(name)
+    .then(sendResponse)
+    .catch((e) => {
+      console.error("[atlas-rmp] Unhandled error in lookupProfessor:", e);
+      sendResponse({ found: false, reason: "error", message: e.message });
+    });
+
+  return true; // Keep message channel open for async response
+});
+
+// On install: pre-warm the school ID cache
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("[atlas-rmp] Extension installed — pre-warming school ID cache");
+  getSchoolId().catch((e) => {
+    console.error("[atlas-rmp] School ID pre-warm failed:", e.message);
+  });
+});

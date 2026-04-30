@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Atlas x RMP",
+  "version": "0.1.0",
+  "description": "RateMyProfessor ratings injected inline on atlas.ai.umich.edu and webapps.lsa.umich.edu/cg",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://atlas.ai.umich.edu/*",
+    "https://webapps.lsa.umich.edu/cg/*",
+    "https://www.ratemyprofessors.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://atlas.ai.umich.edu/*",
+        "https://webapps.lsa.umich.edu/cg/*"
+      ],
+      "js": ["src/content.js"],
+      "css": ["src/inject.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
