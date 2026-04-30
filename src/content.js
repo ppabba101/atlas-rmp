@@ -455,11 +455,12 @@ function renderInstructorList(card, instructorResults, authFailed, sectionInfo) 
   wrapper.appendChild(ul);
 
   // Optional section-summary footer (only when we got real term data)
-  if (sectionInfo && sectionInfo.lectures > 0) {
+  if (sectionInfo && sectionInfo.count > 0) {
     const footer = document.createElement("div");
     footer.className = "atlas-rmp-section-info";
     const parts = [];
-    parts.push(`${sectionInfo.lectures} lecture${sectionInfo.lectures === 1 ? "" : "s"}`);
+    const label = sectionInfo.sectionLabel || "section";
+    parts.push(`${sectionInfo.count} ${label}${sectionInfo.count === 1 ? "" : "s"}`);
     if (sectionInfo.openCount > 0) parts.push(`${sectionInfo.openCount} open`);
     if (sectionInfo.waitlistCount > 0) parts.push(`${sectionInfo.waitlistCount} wait list`);
     if (sectionInfo.closedCount > 0) parts.push(`${sectionInfo.closedCount} closed`);
@@ -541,11 +542,19 @@ async function processCard(job) {
           if (res.ok) {
             const data = await res.json();
             const offered = Array.isArray(data?.offered_classes) ? data.offered_classes : [];
-            const lectures = offered.filter((c) => c?.section_type === "LEC");
+            // Primary teaching section types (where the actual prof is listed).
+            // Skip LAB/DIS — those are TA-led; MID/EXM/FLD have no instructor.
+            const PRIMARY = new Set(["LEC", "SEM", "REC", "IND", "STU"]);
+            const SKIP = new Set(["MID", "EXM", "FLD"]);
+            let sections = offered.filter((c) => c?.section_type && PRIMARY.has(c.section_type));
+            if (sections.length === 0) {
+              // Fallback: courses with only LAB/DIS-style sections (rare but real)
+              sections = offered.filter((c) => c?.section_type && !SKIP.has(c.section_type));
+            }
             const seen = new Set();
             instructors = [];
-            for (const lec of lectures) {
-              for (const inst of lec.instructors || []) {
+            for (const sec of sections) {
+              for (const inst of sec.instructors || []) {
                 const n = inst?.name?.trim();
                 if (!n) continue;
                 const k = n.toLowerCase();
@@ -555,18 +564,24 @@ async function processCard(job) {
               }
             }
             // Section summary for the card footer
-            if (lectures.length > 0) {
+            if (sections.length > 0) {
               let openSeats = 0;
               let openCount = 0;
               let waitlistCount = 0;
               let closedCount = 0;
-              for (const lec of lectures) {
-                if (lec.status === "open") openCount += 1;
-                else if (lec.status === "wait list" || lec.status === "waitlist") waitlistCount += 1;
-                else if (lec.status === "closed") closedCount += 1;
-                if (typeof lec.open_seat_count === "number") openSeats += lec.open_seat_count;
+              for (const sec of sections) {
+                if (sec.status === "open") openCount += 1;
+                else if (sec.status === "wait list" || sec.status === "waitlist") waitlistCount += 1;
+                else if (sec.status === "closed") closedCount += 1;
+                if (typeof sec.open_seat_count === "number") openSeats += sec.open_seat_count;
               }
-              sectionInfo = { lectures: lectures.length, openCount, waitlistCount, closedCount, openSeats };
+              // Pick a human label from the majority section type
+              const typeCounts = {};
+              for (const sec of sections) typeCounts[sec.section_type] = (typeCounts[sec.section_type] || 0) + 1;
+              const majorityType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+              const TYPE_LABELS = { LEC: "lecture", SEM: "seminar", REC: "recitation", IND: "independent study", STU: "studio", LAB: "lab", DIS: "discussion" };
+              const sectionLabel = TYPE_LABELS[majorityType] || "section";
+              sectionInfo = { count: sections.length, sectionLabel, openCount, waitlistCount, closedCount, openSeats };
             }
           } else {
             console.warn("[atlas-rmp] section-table-data HTTP", res.status, stdUrl);
