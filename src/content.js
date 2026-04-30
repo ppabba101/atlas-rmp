@@ -51,6 +51,16 @@ const SELECTORS = {
     'div.row.bottompadding_main a[href^="mailto:"]',
   ],
 
+  // schedule-builder: Atlas Schedule Builder (atlas.ai.umich.edu/schedule-builder/)
+  // CONFIRMED via Step 0 discovery on Fall 2026 plan (2026-04-30): each
+  // instructor name in a section block is an <a class="display-block text-xsmall">
+  // in "Last, First" format. "Instructor TBA" gets filtered by the comma-presence
+  // pre-check in annotate(). High-value page: live section status, seats, time,
+  // location, and the actual section instructor (not historical pool).
+  "schedule-builder": [
+    'a.display-block.text-xsmall',
+  ],
+
   // courseRow: smallest DOM element containing one complete course/section listing
   // Used by captureAllCourses() for Workstream B Path b course harvesting.
   // PLACEHOLDER — Step 0 discovery: inspect a search results page, walk up the DOM
@@ -165,6 +175,17 @@ async function annotate(el) {
 
   const name = el.textContent?.trim();
   if (!name || name.length < 3) {
+    el.removeAttribute(BADGE_ATTR);
+    return;
+  }
+  // Skip placeholder text used by Atlas/Schedule Builder when no instructor is assigned
+  if (/^instructor\s+tba$/i.test(name) || name.toLowerCase() === "tba") {
+    el.removeAttribute(BADGE_ATTR);
+    return;
+  }
+  // Require the text to look name-shaped: must contain at least one space
+  // (single-word matches like "Open" or section IDs are noise on Schedule Builder)
+  if (!name.includes(" ")) {
     el.removeAttribute(BADGE_ATTR);
     return;
   }
@@ -554,7 +575,7 @@ function debouncedEnrich() {
 function scan(root) {
   // Only flatten the 4 instructor-annotation groups; courseRow sub-selectors are
   // plain strings (not arrays) and must not be queried as instructor-name elements.
-  const INSTRUCTOR_SELECTOR_KEYS = ["course-detail", "search-results", "instructor-profile", "dashboard", "course-guide"];
+  const INSTRUCTOR_SELECTOR_KEYS = ["course-detail", "search-results", "instructor-profile", "dashboard", "course-guide", "schedule-builder"];
   const instructorSelectors = INSTRUCTOR_SELECTOR_KEYS.flatMap(k => SELECTORS[k] ?? []);
   const unique = [...new Set(instructorSelectors)];
 
