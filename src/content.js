@@ -171,6 +171,16 @@ function badgeHTML(result, authFailed) {
 async function annotate(el) {
   // Skip already-annotated elements
   if (el.hasAttribute(BADGE_ATTR)) return;
+
+  // Skip Atlas's "Course Instructors" historical-pool table on course detail
+  // pages — it shows everyone who's taught the course in the last 5 academic
+  // years, not who's actually teaching the current term. Badging them is
+  // misleading. The Course Sections table below it (current-term assignments)
+  // is outside this container and still gets badges.
+  if (el.closest(".course-instructors-table-container, .course-instructors-section")) {
+    return;
+  }
+
   el.setAttribute(BADGE_ATTR, "pending");
 
   const name = el.textContent?.trim();
