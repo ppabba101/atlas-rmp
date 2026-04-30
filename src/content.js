@@ -183,9 +183,11 @@ async function annotate(el) {
     el.removeAttribute(BADGE_ATTR);
     return;
   }
-  // Require the text to look name-shaped: must contain at least one space
-  // (single-word matches like "Open" or section IDs are noise on Schedule Builder)
-  if (!name.includes(" ")) {
+  // Require the text to look name-shaped: must contain a space OR a comma
+  // (single-word matches like "Open" or section IDs are noise; Atlas's section
+  // table renders names as "Torralva,Ben" with no space after the comma, so
+  // comma-only counts as a valid name signal)
+  if (!name.includes(" ") && !name.includes(",")) {
     el.removeAttribute(BADGE_ATTR);
     return;
   }
@@ -360,28 +362,6 @@ function extractCourseCode(card) {
 }
 
 /**
- * Parse instructor names from a course-detail HTML document.
- * Returns unique trimmed names in document order.
- *
- * @param {Document} doc
- * @returns {string[]}
- */
-function extractInstructorsFromDoc(doc) {
-  const links = doc.querySelectorAll('a[href*="/instructor/"]');
-  const seen = new Set();
-  const names = [];
-  for (const a of links) {
-    const name = (a.textContent ?? "").trim();
-    if (!name || name.length < 3) continue;
-    const k = name.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    names.push(name);
-  }
-  return names;
-}
-
-/**
  * Render the instructor list inside a card. Sorts by RMP rating descending;
  * unmatched (no RMP) sort to the bottom.
  *
@@ -466,25 +446,22 @@ async function processCard(job) {
     if (cached && Array.isArray(cached.instructors)) {
       instructors = cached.instructors;
     } else {
-      let html;
+      // Atlas course-detail pages hydrate instructor data via XHR after Vue
+      // mounts, so fetching the HTML directly returns no instructors. Hit the
+      // JSON endpoint Atlas itself uses: {detailUrl}course-instructors.json.
+      const apiUrl = detailUrl.replace(/\/?$/, "/") + "course-instructors.json";
       try {
-        const res = await fetch(detailUrl, { credentials: "include" });
+        const res = await fetch(apiUrl, { credentials: "include" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        html = await res.text();
+        const data = await res.json();
+        const arr = Array.isArray(data?.instructor_data) ? data.instructor_data : [];
+        instructors = arr
+          .map((d) => d?.full_name?.trim())
+          .filter((n) => n && n.length > 0);
+        setDetailCache(cacheKey, { instructors });
       } catch (e) {
-        console.warn("[atlas-rmp] detail-page fetch failed:", detailUrl, e.message);
+        console.warn("[atlas-rmp] course-instructors API failed:", apiUrl, e.message);
         instructors = [];
-      }
-
-      if (instructors === null) {
-        try {
-          const doc = new DOMParser().parseFromString(html, "text/html");
-          instructors = extractInstructorsFromDoc(doc);
-          setDetailCache(cacheKey, { instructors });
-        } catch (e) {
-          console.warn("[atlas-rmp] detail-page parse failed:", detailUrl, e.message);
-          instructors = [];
-        }
       }
     }
 
