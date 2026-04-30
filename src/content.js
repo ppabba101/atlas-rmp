@@ -283,13 +283,26 @@ async function annotate(el) {
 
   // Re-annotate when the text changes (Vue reuses <a> elements in Schedule
   // Builder when the user adds/removes courses — same anchor, new prof name).
-  // BADGE_ATTR now stores the name we annotated for. If unchanged, skip; if
-  // changed, strip the stale sibling badge and proceed.
+  // BADGE_ATTR stores the name we annotated for. Three cases:
+  //   - "pending"     → another annotate() call is in flight; bail out (race
+  //                     guard). Without this, a re-scan during the async
+  //                     LOOKUP round-trip would fire a second LOOKUP and
+  //                     insert a duplicate badge — visible as "4.44.4".
+  //   - matches name  → already annotated for current text; skip.
+  //   - other         → stale (text changed). Strip the old sibling badge
+  //                     and proceed.
   const annotatedFor = el.getAttribute(BADGE_ATTR);
+  if (annotatedFor === "pending") return;
   if (annotatedFor === name) return;
-  if (annotatedFor && annotatedFor !== "pending") {
-    const next = el.nextElementSibling;
-    if (next && next.classList.contains("rmp-badge")) next.remove();
+  if (annotatedFor) {
+    // Strip ALL consecutive .rmp-badge siblings — past race conditions could
+    // have left more than one (visible as "4.44.4" doubled rating).
+    let next = el.nextElementSibling;
+    while (next && next.classList.contains("rmp-badge")) {
+      const after = next.nextElementSibling;
+      next.remove();
+      next = after;
+    }
   }
 
   el.setAttribute(BADGE_ATTR, "pending");
