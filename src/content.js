@@ -439,30 +439,86 @@ async function processCard(job) {
   try {
     renderLoadingState(card);
 
-    const cacheKey = `atlas:detail:${courseCode}`;
+    // Extract term code from the detail URL (e.g. ".../EECS281/2610/" → "2610")
+    const termMatch = detailUrl.match(/\/(\d{4})\/?$/);
+    const termCode = termMatch?.[1] || "";
+
+    const cacheKey = `atlas:detail:${courseCode}:${termCode}`;
     let instructors = null;
 
     const cached = await getDetailCache(cacheKey);
     if (cached && Array.isArray(cached.instructors)) {
       instructors = cached.instructors;
     } else {
-      // Atlas course-detail pages hydrate instructor data via XHR after Vue
-      // mounts, so fetching the HTML directly returns no instructors. Hit the
-      // JSON endpoint Atlas itself uses: {detailUrl}course-instructors.json.
-      const apiUrl = detailUrl.replace(/\/?$/, "/") + "course-instructors.json";
+      // course-instructors.json returns the historical instructor pool — useless
+      // for "who teaches this term." section-table-data has per-section term-
+      // specific assignments. It needs course_id (e.g. "012114"), which is only
+      // present on the detail page HTML, not on search-result cards. Two-step:
+      // (1) fetch detail HTML, regex-extract course_id; (2) call
+      // section-table-data with course_id, pull unique LEC-section instructors.
+      let courseId = null;
       try {
-        const res = await fetch(apiUrl, { credentials: "include" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const arr = Array.isArray(data?.instructor_data) ? data.instructor_data : [];
-        instructors = arr
-          .map((d) => d?.full_name?.trim())
-          .filter((n) => n && n.length > 0);
-        setDetailCache(cacheKey, { instructors });
+        const htmlRes = await fetch(detailUrl, { credentials: "include" });
+        if (htmlRes.ok) {
+          const html = await htmlRes.text();
+          const m = html.match(/course_id["':\s=]+(["']?)(\d{5,7})\1/);
+          courseId = m?.[2] || null;
+        }
       } catch (e) {
-        console.warn("[atlas-rmp] course-instructors API failed:", apiUrl, e.message);
-        instructors = [];
+        console.warn("[atlas-rmp] detail HTML fetch failed:", detailUrl, e.message);
       }
+
+      if (courseId && termCode) {
+        const stdUrl =
+          "https://atlas.ai.umich.edu/api/section-table-data/" +
+          encodeURIComponent(courseCode) +
+          "/" + termCode + "/?course_id=" + courseId;
+        try {
+          const res = await fetch(stdUrl, { credentials: "include" });
+          if (res.ok) {
+            const data = await res.json();
+            const offered = Array.isArray(data?.offered_classes) ? data.offered_classes : [];
+            const lectures = offered.filter((c) => c?.section_type === "LEC");
+            const seen = new Set();
+            instructors = [];
+            for (const lec of lectures) {
+              for (const inst of lec.instructors || []) {
+                const n = inst?.name?.trim();
+                if (!n) continue;
+                const k = n.toLowerCase();
+                if (seen.has(k)) continue;
+                seen.add(k);
+                instructors.push(n);
+              }
+            }
+          } else {
+            console.warn("[atlas-rmp] section-table-data HTTP", res.status, stdUrl);
+          }
+        } catch (e) {
+          console.warn("[atlas-rmp] section-table-data fetch failed:", stdUrl, e.message);
+        }
+      }
+
+      // Fallback to historical course-instructors.json if section-table-data didn't
+      // return a usable list (e.g. course_id missing, future-term API not yet populated).
+      if (!instructors || instructors.length === 0) {
+        const apiUrl = detailUrl.replace(/\/?$/, "/") + "course-instructors.json";
+        try {
+          const res = await fetch(apiUrl, { credentials: "include" });
+          if (res.ok) {
+            const data = await res.json();
+            const arr = Array.isArray(data?.instructor_data) ? data.instructor_data : [];
+            instructors = arr
+              .map((d) => d?.full_name?.trim())
+              .filter((n) => n && n.length > 0);
+          }
+        } catch (e) {
+          console.warn("[atlas-rmp] course-instructors fallback failed:", apiUrl, e.message);
+        }
+      }
+
+      instructors = instructors || [];
+      setDetailCache(cacheKey, { instructors });
     }
 
     const authFailed = await isAuthFailed();
