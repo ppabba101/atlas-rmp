@@ -114,6 +114,15 @@
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+.atlas-rmp-section-info {
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 0.72em;
+  color: #6b7280;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.01em;
+}
+
 .atlas-rmp-loading {
   margin-top: 8px;
   padding-top: 6px;

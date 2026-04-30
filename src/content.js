@@ -369,7 +369,7 @@ function extractCourseCode(card) {
  * @param {Array<{name: string, result: object|null}>} instructorResults
  * @param {boolean} authFailed
  */
-function renderInstructorList(card, instructorResults, authFailed) {
+function renderInstructorList(card, instructorResults, authFailed, sectionInfo) {
   const target = card.querySelector(".card-content") ?? card;
 
   // Remove any prior render (loading state / stale render)
@@ -379,7 +379,7 @@ function renderInstructorList(card, instructorResults, authFailed) {
   if (!instructorResults || instructorResults.length === 0) {
     const empty = document.createElement("div");
     empty.className = "atlas-rmp-instructors-empty";
-    empty.textContent = "No instructors listed";
+    empty.textContent = "No instructors posted yet for this term";
     target.appendChild(empty);
     return;
   }
@@ -410,6 +410,23 @@ function renderInstructorList(card, instructorResults, authFailed) {
   }
 
   wrapper.appendChild(ul);
+
+  // Optional section-summary footer (only when we got real term data)
+  if (sectionInfo && sectionInfo.lectures > 0) {
+    const footer = document.createElement("div");
+    footer.className = "atlas-rmp-section-info";
+    const parts = [];
+    parts.push(`${sectionInfo.lectures} lecture${sectionInfo.lectures === 1 ? "" : "s"}`);
+    if (sectionInfo.openCount > 0) parts.push(`${sectionInfo.openCount} open`);
+    if (sectionInfo.waitlistCount > 0) parts.push(`${sectionInfo.waitlistCount} wait list`);
+    if (sectionInfo.closedCount > 0) parts.push(`${sectionInfo.closedCount} closed`);
+    if (typeof sectionInfo.openSeats === "number" && sectionInfo.openSeats >= 0) {
+      parts.push(`${sectionInfo.openSeats} seats left`);
+    }
+    footer.textContent = parts.join(" · ");
+    wrapper.appendChild(footer);
+  }
+
   target.appendChild(wrapper);
 }
 
@@ -445,17 +462,20 @@ async function processCard(job) {
 
     const cacheKey = `atlas:detail:${courseCode}:${termCode}`;
     let instructors = null;
+    let sectionInfo = null;
 
     const cached = await getDetailCache(cacheKey);
     if (cached && Array.isArray(cached.instructors)) {
       instructors = cached.instructors;
+      sectionInfo = cached.sectionInfo || null;
     } else {
-      // course-instructors.json returns the historical instructor pool — useless
-      // for "who teaches this term." section-table-data has per-section term-
+      // Strict term-specific lookup: section-table-data has per-section term-
       // specific assignments. It needs course_id (e.g. "012114"), which is only
       // present on the detail page HTML, not on search-result cards. Two-step:
       // (1) fetch detail HTML, regex-extract course_id; (2) call
       // section-table-data with course_id, pull unique LEC-section instructors.
+      // No historical-pool fallback — if the term has no published sections,
+      // we surface that honestly instead of misleading users with old data.
       let courseId = null;
       try {
         const htmlRes = await fetch(detailUrl, { credentials: "include" });
@@ -491,6 +511,20 @@ async function processCard(job) {
                 instructors.push(n);
               }
             }
+            // Section summary for the card footer
+            if (lectures.length > 0) {
+              let openSeats = 0;
+              let openCount = 0;
+              let waitlistCount = 0;
+              let closedCount = 0;
+              for (const lec of lectures) {
+                if (lec.status === "open") openCount += 1;
+                else if (lec.status === "wait list" || lec.status === "waitlist") waitlistCount += 1;
+                else if (lec.status === "closed") closedCount += 1;
+                if (typeof lec.open_seat_count === "number") openSeats += lec.open_seat_count;
+              }
+              sectionInfo = { lectures: lectures.length, openCount, waitlistCount, closedCount, openSeats };
+            }
           } else {
             console.warn("[atlas-rmp] section-table-data HTTP", res.status, stdUrl);
           }
@@ -499,26 +533,8 @@ async function processCard(job) {
         }
       }
 
-      // Fallback to historical course-instructors.json if section-table-data didn't
-      // return a usable list (e.g. course_id missing, future-term API not yet populated).
-      if (!instructors || instructors.length === 0) {
-        const apiUrl = detailUrl.replace(/\/?$/, "/") + "course-instructors.json";
-        try {
-          const res = await fetch(apiUrl, { credentials: "include" });
-          if (res.ok) {
-            const data = await res.json();
-            const arr = Array.isArray(data?.instructor_data) ? data.instructor_data : [];
-            instructors = arr
-              .map((d) => d?.full_name?.trim())
-              .filter((n) => n && n.length > 0);
-          }
-        } catch (e) {
-          console.warn("[atlas-rmp] course-instructors fallback failed:", apiUrl, e.message);
-        }
-      }
-
       instructors = instructors || [];
-      setDetailCache(cacheKey, { instructors });
+      setDetailCache(cacheKey, { instructors, sectionInfo });
     }
 
     const authFailed = await isAuthFailed();
@@ -533,7 +549,7 @@ async function processCard(job) {
     }
 
     const finalAuthFailed = authFailed || instructorResults.some((r) => r.result?.reason === "auth-failed");
-    renderInstructorList(card, instructorResults, finalAuthFailed);
+    renderInstructorList(card, instructorResults, finalAuthFailed, sectionInfo);
     card.setAttribute(ATLAS_ENRICH_ATTR, "done");
   } catch (e) {
     console.warn("[atlas-rmp] enrichment failed for", courseCode, e);
