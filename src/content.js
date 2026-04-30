@@ -75,6 +75,11 @@ const BADGE_ATTR = "data-rmp-badge";
 // Auth-fail badge expiry: only show auth-fail badge if rmp:authFailed was set within 60min
 const AUTH_FAIL_TTL_MS = 60 * 60 * 1000;
 
+// Search-results enricher tunables
+const ATLAS_DETAIL_TTL_MS = 24 * 60 * 60 * 1000; // 24-hour TTL for parsed detail-page extractions
+const ENRICH_CONCURRENCY = 5;                    // max in-flight detail-page fetches
+const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
+
 // ─── Auth-fail check ────────────────────────────────────────────────────────
 
 async function isAuthFailed() {
@@ -246,6 +251,299 @@ function captureAllCourses(root) {
   }
 }
 
+// ─── Search-results enrichment (Atlas Browse Courses) ──────────────────────
+//
+// On Atlas search-results pages (detected by the presence of `.browse-cards-wrapper`
+// in the DOM), each `.bookmarkable-card` is enriched inline with the list of
+// instructors who teach the course PLUS RMP badges next to each. This lets the
+// user scan an entire department's offerings at a glance.
+//
+// Architecture:
+//   1. detectSearchResultsPage() → boolean (.browse-cards-wrapper presence)
+//   2. enrichSearchResults() walks all cards, queues unprocessed ones.
+//   3. A concurrency-limited queue (ENRICH_CONCURRENCY) fetches each detail
+//      page, parses instructors, looks each up via the existing LOOKUP message,
+//      and injects a sorted instructor list into the card.
+//   4. A 24-hour cache at `atlas:detail:${courseCode}` short-circuits the fetch.
+
+const ATLAS_ENRICH_ATTR = "data-atlas-rmp-enriched";
+const enrichQueue = [];
+let enrichInFlight = 0;
+let enrichDebounceTimer = null;
+
+/**
+ * Send a LOOKUP message to background and return the result.
+ * Mirrors the inline pattern used by annotate(); shared helper for the enricher.
+ *
+ * @param {string} name
+ * @returns {Promise<object|null>}
+ */
+function lookupRmp(name) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "LOOKUP", name }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+        } else {
+          resolve(response);
+        }
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Read a 24-hour-TTL cache entry. Stored under arbitrary key with shape
+ * `{ ...payload, capturedAt: number }`.
+ *
+ * @param {string} key
+ * @returns {Promise<object|null>}
+ */
+function getDetailCache(key) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(key, (result) => {
+      const entry = result[key];
+      if (!entry || typeof entry.capturedAt !== "number") {
+        resolve(null);
+        return;
+      }
+      if (Date.now() - entry.capturedAt > ATLAS_DETAIL_TTL_MS) {
+        chrome.storage.local.remove(key);
+        resolve(null);
+        return;
+      }
+      resolve(entry);
+    });
+  });
+}
+
+function setDetailCache(key, payload) {
+  chrome.storage.local.set({ [key]: { ...payload, capturedAt: Date.now() } });
+}
+
+/**
+ * Extract a normalized course code (e.g. "EECS183") from a card's text content.
+ * Atlas duplicates the code (visible + screen-reader), so we just take the
+ * first match.
+ *
+ * @param {Element} card
+ * @returns {string|null}
+ */
+function extractCourseCode(card) {
+  const text = card.textContent ?? "";
+  const m = text.match(/^\s*([A-Z]{2,5}\s*\d{3}[A-Z]?)/);
+  if (!m) return null;
+  return m[1].replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Parse instructor names from a course-detail HTML document.
+ * Returns unique trimmed names in document order.
+ *
+ * @param {Document} doc
+ * @returns {string[]}
+ */
+function extractInstructorsFromDoc(doc) {
+  const links = doc.querySelectorAll('a[href*="/instructor/"]');
+  const seen = new Set();
+  const names = [];
+  for (const a of links) {
+    const name = (a.textContent ?? "").trim();
+    if (!name || name.length < 3) continue;
+    const k = name.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    names.push(name);
+  }
+  return names;
+}
+
+/**
+ * Render the instructor list inside a card. Sorts by RMP rating descending;
+ * unmatched (no RMP) sort to the bottom.
+ *
+ * @param {Element} card
+ * @param {Array<{name: string, result: object|null}>} instructorResults
+ * @param {boolean} authFailed
+ */
+function renderInstructorList(card, instructorResults, authFailed) {
+  const target = card.querySelector(".card-content") ?? card;
+
+  // Remove any prior render (loading state / stale render)
+  const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
+  if (prior) prior.remove();
+
+  if (!instructorResults || instructorResults.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "atlas-rmp-instructors-empty";
+    empty.textContent = "No instructors listed";
+    target.appendChild(empty);
+    return;
+  }
+
+  const sorted = [...instructorResults].sort((a, b) => {
+    const ar = a.result && a.result.found && typeof a.result.avgRating === "number" ? a.result.avgRating : -Infinity;
+    const br = b.result && b.result.found && typeof b.result.avgRating === "number" ? b.result.avgRating : -Infinity;
+    if (br !== ar) return br - ar;
+    // Stable-ish tiebreak by name
+    return a.name.localeCompare(b.name);
+  });
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "atlas-rmp-instructors";
+
+  const ul = document.createElement("ul");
+  ul.className = "atlas-rmp-instructor-list";
+
+  for (const { name, result } of sorted) {
+    const li = document.createElement("li");
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "atlas-rmp-instructor-name";
+    nameSpan.textContent = name;
+    li.appendChild(nameSpan);
+    // Reuse existing badge HTML so styling stays consistent
+    li.insertAdjacentHTML("beforeend", badgeHTML(result, authFailed));
+    ul.appendChild(li);
+  }
+
+  wrapper.appendChild(ul);
+  target.appendChild(wrapper);
+}
+
+/**
+ * Render a "loading" placeholder while the detail-page fetch + lookups are in
+ * flight. Replaced by renderInstructorList() once results arrive.
+ */
+function renderLoadingState(card) {
+  const target = card.querySelector(".card-content") ?? card;
+  const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
+  if (prior) prior.remove();
+  const loading = document.createElement("div");
+  loading.className = "atlas-rmp-loading";
+  loading.textContent = "Loading instructors...";
+  target.appendChild(loading);
+}
+
+/**
+ * Process a single card: fetch detail page (or use cache), parse instructors,
+ * look each up on RMP, and inject the result list.
+ *
+ * @param {{card: Element, detailUrl: string, courseCode: string}} job
+ */
+async function processCard(job) {
+  const { card, detailUrl, courseCode } = job;
+
+  try {
+    renderLoadingState(card);
+
+    const cacheKey = `atlas:detail:${courseCode}`;
+    let instructors = null;
+
+    const cached = await getDetailCache(cacheKey);
+    if (cached && Array.isArray(cached.instructors)) {
+      instructors = cached.instructors;
+    } else {
+      let html;
+      try {
+        const res = await fetch(detailUrl, { credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        html = await res.text();
+      } catch (e) {
+        console.warn("[atlas-rmp] detail-page fetch failed:", detailUrl, e.message);
+        instructors = [];
+      }
+
+      if (instructors === null) {
+        try {
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          instructors = extractInstructorsFromDoc(doc);
+          setDetailCache(cacheKey, { instructors });
+        } catch (e) {
+          console.warn("[atlas-rmp] detail-page parse failed:", detailUrl, e.message);
+          instructors = [];
+        }
+      }
+    }
+
+    const authFailed = await isAuthFailed();
+
+    let instructorResults;
+    if (authFailed) {
+      instructorResults = instructors.map((name) => ({ name, result: { reason: "auth-failed" } }));
+    } else {
+      instructorResults = await Promise.all(
+        instructors.map(async (name) => ({ name, result: await lookupRmp(name) }))
+      );
+    }
+
+    const finalAuthFailed = authFailed || instructorResults.some((r) => r.result?.reason === "auth-failed");
+    renderInstructorList(card, instructorResults, finalAuthFailed);
+    card.setAttribute(ATLAS_ENRICH_ATTR, "done");
+  } catch (e) {
+    console.warn("[atlas-rmp] enrichment failed for", courseCode, e);
+    // Leave the card in 'pending' so a future scan can retry on next mutation
+    card.removeAttribute(ATLAS_ENRICH_ATTR);
+    const loading = card.querySelector(".atlas-rmp-loading");
+    if (loading) loading.remove();
+  } finally {
+    enrichInFlight -= 1;
+    drainEnrichQueue();
+  }
+}
+
+function drainEnrichQueue() {
+  while (enrichInFlight < ENRICH_CONCURRENCY && enrichQueue.length > 0) {
+    const job = enrichQueue.shift();
+    enrichInFlight += 1;
+    // Fire and forget; processCard always decrements in its finally.
+    processCard(job);
+  }
+}
+
+function detectSearchResultsPage() {
+  return !!document.querySelector(".browse-cards-wrapper");
+}
+
+/**
+ * Walk all `.bookmarkable-card` elements on the page; for any not yet enriched,
+ * queue them for processing. Idempotent — safe to call repeatedly (e.g. from
+ * the MutationObserver).
+ */
+function enrichSearchResults() {
+  if (!detectSearchResultsPage()) return;
+
+  const cards = document.querySelectorAll(".bookmarkable-card");
+  for (const card of cards) {
+    if (card.hasAttribute(ATLAS_ENRICH_ATTR)) continue;
+
+    const link = card.querySelector("a");
+    const detailUrl = link?.href;
+    if (!detailUrl) continue;
+
+    const courseCode = extractCourseCode(card);
+    if (!courseCode) continue;
+
+    card.setAttribute(ATLAS_ENRICH_ATTR, "pending");
+    enrichQueue.push({ card, detailUrl, courseCode });
+  }
+
+  drainEnrichQueue();
+}
+
+/**
+ * Debounced dispatcher for enrichSearchResults(). 200ms debounce so a flood of
+ * mutations during page render fires once instead of 32 times.
+ */
+function debouncedEnrich() {
+  if (enrichDebounceTimer) clearTimeout(enrichDebounceTimer);
+  enrichDebounceTimer = setTimeout(() => {
+    enrichDebounceTimer = null;
+    enrichSearchResults();
+  }, ENRICH_DEBOUNCE_MS);
+}
+
 // ─── DOM scan ───────────────────────────────────────────────────────────────
 
 /**
@@ -282,6 +580,10 @@ function scan(root) {
 
   // Opportunistic course-data harvesting (Workstream B Path b)
   captureAllCourses(root);
+
+  // Atlas search-results enrichment (Option 2): inject instructor list + RMP
+  // badges onto every `.bookmarkable-card` on Browse Courses pages.
+  debouncedEnrich();
 }
 
 // ─── MutationObserver (Improvement 2) ───────────────────────────────────────

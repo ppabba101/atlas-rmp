@@ -70,3 +70,56 @@
   margin-left: 2px;
   cursor: help;
 }
+
+/* ─── Atlas search-results enrichment (Browse Courses cards) ─────────────── */
+
+.atlas-rmp-instructors {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.78em;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.atlas-rmp-instructor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-rmp-instructor-list li {
+  display: flex;
+  align-items: center;
+  font-size: 0.95em;
+  line-height: 1.3;
+}
+
+.atlas-rmp-instructor-name {
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.atlas-rmp-instructors-empty {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.78em;
+  font-style: italic;
+  color: #9ca3af;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.atlas-rmp-loading {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.78em;
+  font-style: italic;
+  color: #9ca3af;
+  font-family: system-ui, -apple-system, sans-serif;
+}
