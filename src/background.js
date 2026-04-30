@@ -193,4 +193,49 @@ chrome.runtime.onInstalled.addListener(() => {
   getSchoolId().catch((e) => {
     console.error("[atlas-rmp] School ID pre-warm failed:", e.message);
   });
+  syncAuthFailedBadge();
 });
+
+// ─── Toolbar action: surface auth-fail state on the icon ───────────────────
+//
+// Whenever rmp:authFailed flips on/off, update the toolbar badge + tooltip so
+// the user sees the problem before opening Atlas. The popup also exposes a
+// "open options" link, but the badge is the most discoverable signal.
+
+const AUTH_FAIL_BADGE_TEXT = "!";
+const AUTH_FAIL_TITLE = "Atlas x RMP — auth expired. Click to update token in extension Options.";
+const DEFAULT_TITLE   = "Atlas x RMP";
+
+function setAuthFailedBadge(isFailed) {
+  try {
+    if (chrome.action?.setBadgeText) {
+      chrome.action.setBadgeText({ text: isFailed ? AUTH_FAIL_BADGE_TEXT : "" });
+    }
+    if (chrome.action?.setBadgeBackgroundColor) {
+      chrome.action.setBadgeBackgroundColor({ color: "#b91c1c" });
+    }
+    if (chrome.action?.setTitle) {
+      chrome.action.setTitle({ title: isFailed ? AUTH_FAIL_TITLE : DEFAULT_TITLE });
+    }
+  } catch (e) {
+    // chrome.action may be unavailable in some test contexts — ignore.
+  }
+}
+
+function syncAuthFailedBadge() {
+  chrome.storage.local.get("rmp:authFailed", (result) => {
+    const entry = result?.["rmp:authFailed"];
+    setAuthFailedBadge(!!(entry && entry.ts));
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes["rmp:authFailed"]) {
+    const newVal = changes["rmp:authFailed"].newValue;
+    setAuthFailedBadge(!!(newVal && newVal.ts));
+  }
+});
+
+// Cold start (service worker wake-up) also needs to repaint the badge.
+syncAuthFailedBadge();

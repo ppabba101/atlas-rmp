@@ -90,6 +90,77 @@ const ATLAS_DETAIL_TTL_MS = 24 * 60 * 60 * 1000; // 24-hour TTL for parsed detai
 const ENRICH_CONCURRENCY = 5;                    // max in-flight detail-page fetches
 const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
 
+// ─── User settings (Feature B) ──────────────────────────────────────────────
+//
+// Persisted under chrome.storage.local keys "setting:hideClosedSections",
+// "setting:hideEmptyCards", "setting:minRmpRating". Mutated by the Options
+// page and the toolbar popup. Read on page load and refreshed live via
+// chrome.storage.onChanged. CSS in inject.css does the actual hiding.
+
+const SETTING_KEYS = {
+  hideClosedSections: "setting:hideClosedSections",
+  hideEmptyCards:     "setting:hideEmptyCards",
+  minRmpRating:       "setting:minRmpRating",
+};
+
+let SETTINGS = {
+  hideClosedSections: false,
+  hideEmptyCards:     false,
+  minRmpRating:       0,
+};
+
+function loadSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(Object.values(SETTING_KEYS), (result) => {
+      SETTINGS = {
+        hideClosedSections: !!result[SETTING_KEYS.hideClosedSections],
+        hideEmptyCards:     !!result[SETTING_KEYS.hideEmptyCards],
+        minRmpRating:       Number(result[SETTING_KEYS.minRmpRating]) || 0,
+      };
+      resolve();
+    });
+  });
+}
+
+/**
+ * Walk the DOM and apply the current SETTINGS to already-rendered cards. Pure
+ * data-attribute mutation — CSS in inject.css does the hiding. Cheap enough to
+ * run on every settings change.
+ */
+function applyFiltersToDom() {
+  const closedFlag = SETTINGS.hideClosedSections ? "true" : "false";
+  for (const sec of document.querySelectorAll(".atlas-rmp-section")) {
+    sec.setAttribute("data-hide-closed", closedFlag);
+  }
+
+  const emptyFlag = SETTINGS.hideEmptyCards ? "true" : "false";
+  for (const card of document.querySelectorAll(".atlas-rmp-card-empty")) {
+    card.setAttribute("data-hide-empty", emptyFlag);
+  }
+
+  // Min-rating filter: a section row falls below the threshold if the filter
+  // is on (>0) AND every instructor either has no rating or rates below the
+  // threshold. The data-min-best attribute carries the section's max rating
+  // (set by renderSectionList); -1 = no rated instructors.
+  const min = SETTINGS.minRmpRating;
+  for (const sec of document.querySelectorAll(".atlas-rmp-section")) {
+    const best = Number(sec.getAttribute("data-min-best"));
+    const below = min > 0 && (Number.isNaN(best) || best < min);
+    sec.setAttribute("data-below-min", below ? "true" : "false");
+  }
+}
+
+/**
+ * Strip the enrich attribute from every card so the next debouncedEnrich() call
+ * re-runs processCard for it. Used when settings change in a way that needs a
+ * full re-scan (e.g., switching between hide-empty modes).
+ */
+function invalidateAllEnrichments() {
+  for (const card of document.querySelectorAll("[" + ATLAS_ENRICH_ATTR + "]")) {
+    card.removeAttribute(ATLAS_ENRICH_ATTR);
+  }
+}
+
 // ─── Fetch with timeout ─────────────────────────────────────────────────────
 
 const ATLAS_FETCH_TIMEOUT_MS = 10000;
@@ -149,8 +220,8 @@ function esc(s) {
 function badgeHTML(result, authFailed) {
   // Improvement 3: auth-fail badge takes priority
   if (authFailed || (result && result.reason === "auth-failed")) {
-    return `<span class="rmp-badge rmp-auth-fail" title="RMP auth token expired. Re-paste token in src/lib/rmp.js">` +
-      `RMP auth expired — re-paste token</span>`;
+    return `<span class="rmp-badge rmp-auth-fail" title="RMP auth token expired. Click the extension icon to update your token in Options.">` +
+      `RMP auth expired — update token in Options</span>`;
   }
 
   if (!result || !result.found) {
@@ -195,9 +266,6 @@ function badgeHTML(result, authFailed) {
  * @param {Element} el
  */
 async function annotate(el) {
-  // Skip already-annotated elements
-  if (el.hasAttribute(BADGE_ATTR)) return;
-
   // Skip Atlas's "Course Instructors" historical-pool table on course detail
   // pages — it shows everyone who's taught the course in the last 5 academic
   // years, not who's actually teaching the current term. Badging them is
@@ -207,13 +275,24 @@ async function annotate(el) {
     return;
   }
 
-  el.setAttribute(BADGE_ATTR, "pending");
-
   const name = el.textContent?.trim();
   if (!name || name.length < 3) {
     el.removeAttribute(BADGE_ATTR);
     return;
   }
+
+  // Re-annotate when the text changes (Vue reuses <a> elements in Schedule
+  // Builder when the user adds/removes courses — same anchor, new prof name).
+  // BADGE_ATTR now stores the name we annotated for. If unchanged, skip; if
+  // changed, strip the stale sibling badge and proceed.
+  const annotatedFor = el.getAttribute(BADGE_ATTR);
+  if (annotatedFor === name) return;
+  if (annotatedFor && annotatedFor !== "pending") {
+    const next = el.nextElementSibling;
+    if (next && next.classList.contains("rmp-badge")) next.remove();
+  }
+
+  el.setAttribute(BADGE_ATTR, "pending");
   // Skip placeholder text used by Atlas/Schedule Builder when no instructor is assigned
   if (/^instructor\s+tba$/i.test(name) || name.toLowerCase() === "tba") {
     el.removeAttribute(BADGE_ATTR);
@@ -232,7 +311,7 @@ async function annotate(el) {
   const authFailed = await isAuthFailed();
 
   if (authFailed) {
-    el.setAttribute(BADGE_ATTR, "auth-fail");
+    el.setAttribute(BADGE_ATTR, name);
     el.insertAdjacentHTML("afterend", badgeHTML(null, true));
     return;
   }
@@ -254,7 +333,15 @@ async function annotate(el) {
     return;
   }
 
-  el.setAttribute(BADGE_ATTR, "done");
+  // Guard: if Vue swapped the anchor's text while our LOOKUP was in flight,
+  // abort — a future scan will pick up the new name.
+  const stillSameName = (el.textContent ?? "").trim() === name;
+  if (!stillSameName) {
+    el.removeAttribute(BADGE_ATTR);
+    return;
+  }
+
+  el.setAttribute(BADGE_ATTR, name);
 
   const newAuthFailed = result?.reason === "auth-failed" || (await isAuthFailed());
   el.insertAdjacentHTML("afterend", badgeHTML(result, newAuthFailed));
@@ -455,6 +542,15 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
   const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
   if (prior) prior.remove();
 
+  // Determine "empty card" state: either no sections at all, or no section has
+  // any instructor names. Tag the card so CSS (driven by data-hide-empty) can
+  // toggle visibility without a re-render.
+  const hasAnyInstructor =
+    Array.isArray(sections) &&
+    sections.some((s) => Array.isArray(s.instructors) && s.instructors.length > 0);
+  card.classList.toggle("atlas-rmp-card-empty", !hasAnyInstructor);
+  card.setAttribute("data-hide-empty", SETTINGS.hideEmptyCards ? "true" : "false");
+
   if (!sections || sections.length === 0) {
     const empty = document.createElement("div");
     empty.className = "atlas-rmp-instructors-empty";
@@ -472,6 +568,26 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
   for (const sec of sections) {
     const row = document.createElement("li");
     row.className = `atlas-rmp-section ${statusClass(sec.status)}`;
+
+    // Filter data-attributes — read live SETTINGS so the row appears with the
+    // correct visibility on first paint. Storage-change handler also re-applies.
+    row.setAttribute("data-hide-closed", SETTINGS.hideClosedSections ? "true" : "false");
+
+    // data-min-best: the highest rating among this section's instructors, or
+    // -1 if none have a rating. Used by the min-rating filter in
+    // applyFiltersToDom() to flip data-below-min on/off without re-rendering.
+    let best = -1;
+    if (Array.isArray(sec.instructors)) {
+      for (const n of sec.instructors) {
+        const r = nameToResult.get(n);
+        const rating = r && r.found && typeof r.avgRating === "number" ? r.avgRating : null;
+        if (rating != null && rating > best) best = rating;
+      }
+    }
+    row.setAttribute("data-min-best", String(best));
+    const minThreshold = SETTINGS.minRmpRating;
+    const belowMin = minThreshold > 0 && best < minThreshold;
+    row.setAttribute("data-below-min", belowMin ? "true" : "false");
 
     // Header line: section + type + status + seats + days/time + location
     const header = document.createElement("div");
@@ -820,10 +936,13 @@ function scan(root) {
     }
 
     for (const el of elements) {
-      if (el.hasAttribute(BADGE_ATTR)) continue;
       if (el.classList.contains("rmp-badge")) continue;
       const text = el.textContent?.trim() ?? "";
       if (text.length < 3) continue;
+      // Skip only when BADGE_ATTR matches CURRENT text. Vue reuses elements in
+      // Schedule Builder when courses are added, swapping the name in place;
+      // a stale-attribute skip here would freeze old badges to new names.
+      if (el.getAttribute(BADGE_ATTR) === text) continue;
       annotate(el);
     }
   }
@@ -863,10 +982,37 @@ observer.observe(document.body, {
   characterDataOldValue: true,
 });
 
+// ─── Settings live updates ──────────────────────────────────────────────────
+//
+// Watch chrome.storage for changes to the three filter keys. Pure attribute
+// flips (hide-closed, hide-empty, below-min) only need applyFiltersToDom();
+// changes to the empty-card filter benefit from a re-enrich pass so newly-
+// rendered cards pick up the latest data-attributes too.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  const watched = Object.values(SETTING_KEYS);
+  if (!watched.some((k) => changes[k])) return;
+
+  loadSettings().then(() => {
+    applyFiltersToDom();
+    // Re-run enrichment so any newly-visible cards get the current settings.
+    if (changes[SETTING_KEYS.hideEmptyCards]) {
+      invalidateAllEnrichments();
+      debouncedEnrich();
+    }
+  });
+});
+
 // ─── Initial scan ────────────────────────────────────────────────────────────
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => scan(document.body));
-} else {
+async function init() {
+  await loadSettings();
   scan(document.body);
+  applyFiltersToDom();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
 }

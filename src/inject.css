@@ -197,3 +197,25 @@
   color: #9ca3af;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* ─── User-toggled filter visibility (Feature B) ─────────────────────────── */
+/*
+ * Filters are driven by data-attributes set on enriched cards/sections by
+ * content.js. CSS does the actual hiding so toggling settings doesn't require
+ * a re-scan. The data attribute is wired up in content.js applyFilters().
+ */
+
+/* Hide individual closed section rows when "hide closed sections" is on. */
+.atlas-rmp-section.atlas-rmp-status-closed[data-hide-closed="true"] {
+  display: none;
+}
+
+/* Hide entire course cards that have no instructors posted yet. */
+.atlas-rmp-card-empty[data-hide-empty="true"] {
+  display: none;
+}
+
+/* Dim section rows whose instructors all fall below the min-rating filter. */
+.atlas-rmp-section[data-below-min="true"] {
+  display: none;
+}

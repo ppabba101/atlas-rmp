@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Atlas x RMP",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "RateMyProfessor ratings injected inline on atlas.ai.umich.edu and webapps.lsa.umich.edu/cg",
   "permissions": ["storage"],
   "host_permissions": [
@@ -24,6 +24,11 @@
       "run_at": "document_idle"
     }
   ],
+  "options_page": "src/options.html",
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Atlas x RMP"
+  },
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
