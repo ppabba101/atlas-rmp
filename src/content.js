@@ -90,6 +90,30 @@ const ATLAS_DETAIL_TTL_MS = 24 * 60 * 60 * 1000; // 24-hour TTL for parsed detai
 const ENRICH_CONCURRENCY = 5;                    // max in-flight detail-page fetches
 const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
 
+// ─── Fetch with timeout ─────────────────────────────────────────────────────
+
+const ATLAS_FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * fetch() that aborts after the given timeout. A hung connection used to
+ * occupy a concurrency slot indefinitely, locking the enricher queue after
+ * ENRICH_CONCURRENCY hangs. The timeout guarantees the slot is released.
+ *
+ * @param {string} url
+ * @param {RequestInit} options
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Response>}
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = ATLAS_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Auth-fail check ────────────────────────────────────────────────────────
 
 async function isAuthFailed() {
@@ -365,10 +389,19 @@ function setDetailCache(key, payload) {
  * @returns {string|null}
  */
 function extractCourseCode(card) {
-  const text = card.textContent ?? "";
-  const m = text.match(/^\s*([A-Z]{2,5}\s*\d{3}[A-Z]?)/);
-  if (!m) return null;
-  return m[1].replace(/\s+/g, "").toUpperCase();
+  // Extract from the card's link URL rather than text content. textContent
+  // includes screen-reader duplicates like "AAS 103AAS 103 Add this course..."
+  // which made the previous trailing-letter regex grab the "A" from "Add".
+  // The href is canonical: /courses/{LETTERS}{DIGITS}/{TERM}/.
+  const link = card.querySelector('a[href*="/courses/"]');
+  if (link) {
+    const m = link.href.match(/\/courses\/([A-Z]+)(\d+[A-Z]?\d?)\b/);
+    if (m) return `${m[1]} ${m[2]}`; // SPACED: "AAS 200" — section-table-data API needs the space
+  }
+  // Fallback: text-based with strict boundary at first non-alphanum
+  const text = (card.textContent ?? "").trim();
+  const m2 = text.match(/^([A-Z]{2,5})\s+(\d{3}[A-Z]?\d?)(?![A-Z0-9])/);
+  return m2 ? `${m2[1]} ${m2[2]}` : null;
 }
 
 /**
@@ -488,7 +521,7 @@ async function processCard(job) {
       // we surface that honestly instead of misleading users with old data.
       let courseId = null;
       try {
-        const htmlRes = await fetch(detailUrl, { credentials: "include" });
+        const htmlRes = await fetchWithTimeout(detailUrl, { credentials: "include" });
         if (htmlRes.ok) {
           const html = await htmlRes.text();
           const m = html.match(/course_id["':\s=]+(["']?)(\d{5,7})\1/);
@@ -504,7 +537,7 @@ async function processCard(job) {
           encodeURIComponent(courseCode) +
           "/" + termCode + "/?course_id=" + courseId;
         try {
-          const res = await fetch(stdUrl, { credentials: "include" });
+          const res = await fetchWithTimeout(stdUrl, { credentials: "include" });
           if (res.ok) {
             const data = await res.json();
             const offered = Array.isArray(data?.offered_classes) ? data.offered_classes : [];
@@ -631,14 +664,48 @@ function debouncedEnrich() {
  *
  * @param {Element|Document} root
  */
-function scan(root) {
-  // Only flatten the 4 instructor-annotation groups; courseRow sub-selectors are
-  // plain strings (not arrays) and must not be queried as instructor-name elements.
-  const INSTRUCTOR_SELECTOR_KEYS = ["course-detail", "search-results", "instructor-profile", "dashboard", "course-guide", "schedule-builder"];
-  const instructorSelectors = INSTRUCTOR_SELECTOR_KEYS.flatMap(k => SELECTORS[k] ?? []);
-  const unique = [...new Set(instructorSelectors)];
+/**
+ * Detect which page type we're on based on URL. Returns one of the SELECTORS
+ * keys, or null if we should not annotate. URL-gating prevents selectors like
+ * `h1.text-large` (only valid on instructor profiles) from firing on every
+ * page and badging non-name headings (e.g., "Browse Courses", user's own name
+ * on the dashboard).
+ *
+ * @returns {string|null}
+ */
+function detectPageType() {
+  const host = location.hostname;
+  const path = location.pathname;
 
-  for (const selector of unique) {
+  if (host === "webapps.lsa.umich.edu" && path.startsWith("/cg/")) {
+    return "course-guide";
+  }
+
+  if (host === "atlas.ai.umich.edu") {
+    if (path.startsWith("/schedule-builder")) return "schedule-builder";
+    if (path.startsWith("/instructor/")) return "instructor-profile";
+    // /courses/EECS281/2610/ → course-detail (course code + digits after /courses/)
+    if (/^\/courses\/[A-Z]+\d/.test(path)) return "course-detail";
+    // /courses/?... or /courses or /course-search → search-results (Browse Courses)
+    if (path === "/courses" || path === "/courses/" || path.startsWith("/course-search")) {
+      return "search-results";
+    }
+    if (path === "/" || path.startsWith("/my-dashboard")) return "dashboard";
+  }
+
+  return null;
+}
+
+function scan(root) {
+  const pageType = detectPageType();
+  if (!pageType) return;
+
+  // Only run selectors for the current page type. courseRow sub-selectors are
+  // plain strings (not arrays) and must not be queried as instructor-name
+  // elements — they're handled separately by captureAllCourses().
+  const selectors = Array.isArray(SELECTORS[pageType]) ? SELECTORS[pageType] : [];
+
+  for (const selector of selectors) {
     let elements;
     try {
       elements = root.querySelectorAll(selector);
@@ -648,22 +715,24 @@ function scan(root) {
     }
 
     for (const el of elements) {
-      // Skip if already annotated or if it's a badge itself
       if (el.hasAttribute(BADGE_ATTR)) continue;
       if (el.classList.contains("rmp-badge")) continue;
-      // Skip very short or empty text (likely icons/buttons)
       const text = el.textContent?.trim() ?? "";
       if (text.length < 3) continue;
       annotate(el);
     }
   }
 
-  // Opportunistic course-data harvesting (Workstream B Path b)
-  captureAllCourses(root);
+  // Opportunistic course-data harvesting (Workstream B Path b) — only on
+  // pages where course rows exist (search-results / course-detail).
+  if (pageType === "search-results" || pageType === "course-detail") {
+    captureAllCourses(root);
+  }
 
-  // Atlas search-results enrichment (Option 2): inject instructor list + RMP
-  // badges onto every `.bookmarkable-card` on Browse Courses pages.
-  debouncedEnrich();
+  // Atlas search-results enrichment (Option 2): only on Browse Courses pages.
+  if (pageType === "search-results") {
+    debouncedEnrich();
+  }
 }
 
 // ─── MutationObserver (Improvement 2) ───────────────────────────────────────
