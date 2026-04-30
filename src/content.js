@@ -158,20 +158,22 @@ function badgeHTML(result, authFailed) {
   }
 
   const rating = result.avgRating;
-  const ratingText = rating != null ? rating.toFixed(1) : "?";
   const numRatings = result.numRatings ?? 0;
   const url = esc(result.rmpUrl ?? "#");
 
-  let cls;
-  if (rating == null) {
-    cls = "rmp-miss";
-  } else if (rating >= 4) {
-    cls = "rmp-good";
-  } else if (rating >= 3) {
-    cls = "rmp-ok";
-  } else {
-    cls = "rmp-bad";
+  // Found on RMP but with 0 ratings → "no ratings" link instead of misleading "0.0"
+  if (rating == null || numRatings === 0) {
+    return (
+      `<a class="rmp-badge rmp-miss" href="${url}" target="_blank" rel="noopener" ` +
+      `title="On RMP but no ratings yet">no ratings</a>`
+    );
   }
+
+  const ratingText = rating.toFixed(1);
+  let cls;
+  if (rating >= 4) cls = "rmp-good";
+  else if (rating >= 3) cls = "rmp-ok";
+  else cls = "rmp-bad";
 
   const warnGlyph =
     result.confidence != null && result.confidence < 0.95
@@ -404,22 +406,56 @@ function extractCourseCode(card) {
   return m2 ? `${m2[1]} ${m2[2]}` : null;
 }
 
+// Day-of-week and section-type formatting helpers for renderSectionList
+const DAY_LETTERS = { 1: "M", 2: "Tu", 3: "W", 4: "Th", 5: "F", 6: "Sa", 7: "Su" };
+const TYPE_LABEL = { LEC: "Lecture", SEM: "Seminar", REC: "Recitation", IND: "Independent", STU: "Studio", LAB: "Lab", DIS: "Discussion" };
+
+function formatDays(days) {
+  if (!Array.isArray(days) || days.length === 0) return "";
+  return days.map((d) => DAY_LETTERS[d] || "").join("");
+}
+
+function formatTime(t) {
+  if (!t || typeof t !== "string") return "";
+  const [hStr, mStr] = t.split(":");
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  const period = h >= 12 ? "p" : "a";
+  const h12 = h % 12 || 12;
+  return `${h12}:${m.toString().padStart(2, "0")}${period}`;
+}
+
+function statusClass(status) {
+  if (status === "open") return "atlas-rmp-status-open";
+  if (status === "wait list" || status === "waitlist") return "atlas-rmp-status-wait";
+  if (status === "closed") return "atlas-rmp-status-closed";
+  return "atlas-rmp-status-other";
+}
+
+function statusLabel(status) {
+  if (status === "open") return "open";
+  if (status === "wait list" || status === "waitlist") return "wait list";
+  if (status === "closed") return "closed";
+  return status || "?";
+}
+
 /**
- * Render the instructor list inside a card. Sorts by RMP rating descending;
- * unmatched (no RMP) sort to the bottom.
+ * Render a section-by-section list inside a card. Each section row shows
+ * status, seats, days/time, location, and per-section instructors with RMP
+ * badges. Sections are kept in their natural order from Atlas.
  *
  * @param {Element} card
- * @param {Array<{name: string, result: object|null}>} instructorResults
+ * @param {Array<object>} sections - slim section records built in processCard
+ * @param {Map<string, object>} nameToResult - instructor name → RMP result
  * @param {boolean} authFailed
  */
-function renderInstructorList(card, instructorResults, authFailed, sectionInfo) {
+function renderSectionList(card, sections, nameToResult, authFailed) {
   const target = card.querySelector(".card-content") ?? card;
-
-  // Remove any prior render (loading state / stale render)
   const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
   if (prior) prior.remove();
 
-  if (!instructorResults || instructorResults.length === 0) {
+  if (!sections || sections.length === 0) {
     const empty = document.createElement("div");
     empty.className = "atlas-rmp-instructors-empty";
     empty.textContent = "No instructors posted yet for this term";
@@ -427,50 +463,82 @@ function renderInstructorList(card, instructorResults, authFailed, sectionInfo) 
     return;
   }
 
-  const sorted = [...instructorResults].sort((a, b) => {
-    const ar = a.result && a.result.found && typeof a.result.avgRating === "number" ? a.result.avgRating : -Infinity;
-    const br = b.result && b.result.found && typeof b.result.avgRating === "number" ? b.result.avgRating : -Infinity;
-    if (br !== ar) return br - ar;
-    // Stable-ish tiebreak by name
-    return a.name.localeCompare(b.name);
-  });
-
   const wrapper = document.createElement("div");
   wrapper.className = "atlas-rmp-instructors";
 
-  const ul = document.createElement("ul");
-  ul.className = "atlas-rmp-instructor-list";
+  const list = document.createElement("ul");
+  list.className = "atlas-rmp-section-list";
 
-  for (const { name, result } of sorted) {
-    const li = document.createElement("li");
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "atlas-rmp-instructor-name";
-    nameSpan.textContent = name;
-    li.appendChild(nameSpan);
-    // Reuse existing badge HTML so styling stays consistent
-    li.insertAdjacentHTML("beforeend", badgeHTML(result, authFailed));
-    ul.appendChild(li);
-  }
+  for (const sec of sections) {
+    const row = document.createElement("li");
+    row.className = `atlas-rmp-section ${statusClass(sec.status)}`;
 
-  wrapper.appendChild(ul);
+    // Header line: section + type + status + seats + days/time + location
+    const header = document.createElement("div");
+    header.className = "atlas-rmp-section-header";
 
-  // Optional section-summary footer (only when we got real term data)
-  if (sectionInfo && sectionInfo.count > 0) {
-    const footer = document.createElement("div");
-    footer.className = "atlas-rmp-section-info";
-    const parts = [];
-    const label = sectionInfo.sectionLabel || "section";
-    parts.push(`${sectionInfo.count} ${label}${sectionInfo.count === 1 ? "" : "s"}`);
-    if (sectionInfo.openCount > 0) parts.push(`${sectionInfo.openCount} open`);
-    if (sectionInfo.waitlistCount > 0) parts.push(`${sectionInfo.waitlistCount} wait list`);
-    if (sectionInfo.closedCount > 0) parts.push(`${sectionInfo.closedCount} closed`);
-    if (typeof sectionInfo.openSeats === "number" && sectionInfo.openSeats >= 0) {
-      parts.push(`${sectionInfo.openSeats} seats left`);
+    const idSpan = document.createElement("span");
+    idSpan.className = "atlas-rmp-section-id";
+    idSpan.textContent = `${sec.section || "?"} ${TYPE_LABEL[sec.type] || sec.type || ""}`.trim();
+    header.appendChild(idSpan);
+
+    const statusSpan = document.createElement("span");
+    statusSpan.className = `atlas-rmp-section-status ${statusClass(sec.status)}`;
+    let statusText = statusLabel(sec.status);
+    if (sec.status === "open" && typeof sec.openSeats === "number") {
+      statusText += ` · ${sec.openSeats}/${sec.cap ?? "?"}`;
+    } else if ((sec.status === "wait list" || sec.status === "waitlist") && typeof sec.openSeats === "number") {
+      statusText += ` · ${sec.openSeats} wl`;
     }
-    footer.textContent = parts.join(" · ");
-    wrapper.appendChild(footer);
+    statusSpan.textContent = statusText;
+    header.appendChild(statusSpan);
+
+    const days = formatDays(sec.days);
+    const time = sec.timeIsTba ? "TBA" : (sec.timeStart && sec.timeEnd ? `${formatTime(sec.timeStart)}–${formatTime(sec.timeEnd)}` : "");
+    if (days || time) {
+      const timeSpan = document.createElement("span");
+      timeSpan.className = "atlas-rmp-section-time";
+      timeSpan.textContent = [days, time].filter(Boolean).join(" ");
+      header.appendChild(timeSpan);
+    }
+
+    if (sec.location) {
+      const locSpan = document.createElement("span");
+      locSpan.className = "atlas-rmp-section-loc";
+      locSpan.textContent = sec.location;
+      header.appendChild(locSpan);
+    }
+
+    row.appendChild(header);
+
+    // Instructor line: each instructor with their RMP badge
+    const instLine = document.createElement("div");
+    instLine.className = "atlas-rmp-section-instructors";
+
+    if (!sec.instructors || sec.instructors.length === 0) {
+      instLine.textContent = "Instructor TBA";
+      instLine.classList.add("atlas-rmp-tba");
+    } else {
+      sec.instructors.forEach((name, idx) => {
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "atlas-rmp-instructor-name";
+        nameSpan.textContent = name;
+        instLine.appendChild(nameSpan);
+        instLine.insertAdjacentHTML("beforeend", badgeHTML(nameToResult.get(name), authFailed));
+        if (idx < sec.instructors.length - 1) {
+          const sep = document.createElement("span");
+          sep.className = "atlas-rmp-sep";
+          sep.textContent = " · ";
+          instLine.appendChild(sep);
+        }
+      });
+    }
+
+    row.appendChild(instLine);
+    list.appendChild(row);
   }
 
+  wrapper.appendChild(list);
   target.appendChild(wrapper);
 }
 
@@ -504,14 +572,25 @@ async function processCard(job) {
     const termMatch = detailUrl.match(/\/(\d{4})\/?$/);
     const termCode = termMatch?.[1] || "";
 
-    const cacheKey = `atlas:detail:${courseCode}:${termCode}`;
+    // v2 cache: keyed with :v2 suffix so old {instructors:[]} entries are
+    // ignored. New shape: { sections: [{ section, type, status, openSeats,
+    // cap, days, timeStart, timeEnd, location, instructors: [name,...] }] }
+    const cacheKey = `atlas:detail:${courseCode}:${termCode}:v2`;
     let instructors = null;
-    let sectionInfo = null;
+    let sections = null;
 
     const cached = await getDetailCache(cacheKey);
-    if (cached && Array.isArray(cached.instructors)) {
-      instructors = cached.instructors;
-      sectionInfo = cached.sectionInfo || null;
+    if (cached && Array.isArray(cached.sections)) {
+      sections = cached.sections;
+      // Re-derive unique instructors for RMP lookup
+      const seen = new Set();
+      instructors = [];
+      for (const sec of sections) {
+        for (const n of sec.instructors || []) {
+          const k = n.toLowerCase();
+          if (!seen.has(k)) { seen.add(k); instructors.push(n); }
+        }
+      }
     } else {
       // Strict term-specific lookup: section-table-data has per-section term-
       // specific assignments. It needs course_id (e.g. "012114"), which is only
@@ -543,45 +622,42 @@ async function processCard(job) {
             const data = await res.json();
             const offered = Array.isArray(data?.offered_classes) ? data.offered_classes : [];
             // Primary teaching section types (where the actual prof is listed).
-            // Skip LAB/DIS — those are TA-led; MID/EXM/FLD have no instructor.
+            // Skip LAB/DIS (TA-led) and MID/EXM/FLD (no instructor).
             const PRIMARY = new Set(["LEC", "SEM", "REC", "IND", "STU"]);
             const SKIP = new Set(["MID", "EXM", "FLD"]);
-            let sections = offered.filter((c) => c?.section_type && PRIMARY.has(c.section_type));
-            if (sections.length === 0) {
-              // Fallback: courses with only LAB/DIS-style sections (rare but real)
-              sections = offered.filter((c) => c?.section_type && !SKIP.has(c.section_type));
+            let primary = offered.filter((c) => c?.section_type && PRIMARY.has(c.section_type));
+            if (primary.length === 0) {
+              primary = offered.filter((c) => c?.section_type && !SKIP.has(c.section_type));
             }
+            // Build a slim per-section record (everything we need to render)
+            sections = primary.map((c) => {
+              const m0 = c.meetings && c.meetings[0];
+              return {
+                section: c.section,
+                type: c.section_type,
+                status: c.status,
+                openSeats: typeof c.open_seat_count === "number" ? c.open_seat_count : null,
+                cap: typeof c.enrollment_capacity === "number" ? c.enrollment_capacity : null,
+                days: m0?.days || [],
+                timeStart: m0?.time?.start || null,
+                timeEnd: m0?.time?.end || null,
+                timeIsTba: !!m0?.time?.is_tba,
+                location: m0?.facility_description || null,
+                instructionMode: c.instruction_mode || null,
+                instructors: (c.instructors || []).map((i) => i?.name?.trim()).filter(Boolean),
+              };
+            });
+            // Unique instructor names for RMP lookup
             const seen = new Set();
             instructors = [];
             for (const sec of sections) {
-              for (const inst of sec.instructors || []) {
-                const n = inst?.name?.trim();
-                if (!n) continue;
+              for (const n of sec.instructors) {
                 const k = n.toLowerCase();
-                if (seen.has(k)) continue;
-                seen.add(k);
-                instructors.push(n);
+                if (!seen.has(k)) {
+                  seen.add(k);
+                  instructors.push(n);
+                }
               }
-            }
-            // Section summary for the card footer
-            if (sections.length > 0) {
-              let openSeats = 0;
-              let openCount = 0;
-              let waitlistCount = 0;
-              let closedCount = 0;
-              for (const sec of sections) {
-                if (sec.status === "open") openCount += 1;
-                else if (sec.status === "wait list" || sec.status === "waitlist") waitlistCount += 1;
-                else if (sec.status === "closed") closedCount += 1;
-                if (typeof sec.open_seat_count === "number") openSeats += sec.open_seat_count;
-              }
-              // Pick a human label from the majority section type
-              const typeCounts = {};
-              for (const sec of sections) typeCounts[sec.section_type] = (typeCounts[sec.section_type] || 0) + 1;
-              const majorityType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-              const TYPE_LABELS = { LEC: "lecture", SEM: "seminar", REC: "recitation", IND: "independent study", STU: "studio", LAB: "lab", DIS: "discussion" };
-              const sectionLabel = TYPE_LABELS[majorityType] || "section";
-              sectionInfo = { count: sections.length, sectionLabel, openCount, waitlistCount, closedCount, openSeats };
             }
           } else {
             console.warn("[atlas-rmp] section-table-data HTTP", res.status, stdUrl);
@@ -592,22 +668,25 @@ async function processCard(job) {
       }
 
       instructors = instructors || [];
-      setDetailCache(cacheKey, { instructors, sectionInfo });
+      sections = sections || [];
+      setDetailCache(cacheKey, { sections });
     }
 
     const authFailed = await isAuthFailed();
 
-    let instructorResults;
+    // Build name → RMP result map for the section renderer
+    const nameToResult = new Map();
     if (authFailed) {
-      instructorResults = instructors.map((name) => ({ name, result: { reason: "auth-failed" } }));
+      for (const n of instructors) nameToResult.set(n, { reason: "auth-failed" });
     } else {
-      instructorResults = await Promise.all(
-        instructors.map(async (name) => ({ name, result: await lookupRmp(name) }))
+      const resolved = await Promise.all(
+        instructors.map(async (name) => [name, await lookupRmp(name)])
       );
+      for (const [n, r] of resolved) nameToResult.set(n, r);
     }
 
-    const finalAuthFailed = authFailed || instructorResults.some((r) => r.result?.reason === "auth-failed");
-    renderInstructorList(card, instructorResults, finalAuthFailed, sectionInfo);
+    const finalAuthFailed = authFailed || [...nameToResult.values()].some((r) => r?.reason === "auth-failed");
+    renderSectionList(card, sections || [], nameToResult, finalAuthFailed);
     card.setAttribute(ATLAS_ENRICH_ATTR, "done");
   } catch (e) {
     console.warn("[atlas-rmp] enrichment failed for", courseCode, e);

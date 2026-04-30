@@ -123,6 +123,71 @@
   letter-spacing: 0.01em;
 }
 
+/* Section-by-section breakdown — one row per Atlas section */
+.atlas-rmp-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-rmp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border-left: 3px solid #d1d5db;
+  background: #fafafa;
+  font-size: 0.95em;
+  line-height: 1.3;
+}
+
+.atlas-rmp-section.atlas-rmp-status-open    { border-left-color: #22c55e; }
+.atlas-rmp-section.atlas-rmp-status-wait    { border-left-color: #f59e0b; }
+.atlas-rmp-section.atlas-rmp-status-closed  { border-left-color: #ef4444; }
+
+.atlas-rmp-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.85em;
+  color: #4b5563;
+}
+
+.atlas-rmp-section-id {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.atlas-rmp-section-status {
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+}
+.atlas-rmp-section-status.atlas-rmp-status-open   { color: #15803d; }
+.atlas-rmp-section-status.atlas-rmp-status-wait   { color: #b45309; }
+.atlas-rmp-section-status.atlas-rmp-status-closed { color: #b91c1c; }
+
+.atlas-rmp-section-time { color: #374151; font-variant-numeric: tabular-nums; }
+.atlas-rmp-section-loc  { color: #6b7280; font-style: italic; }
+
+.atlas-rmp-section-instructors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  color: #1f2937;
+}
+
+.atlas-rmp-section-instructors .atlas-rmp-sep { color: #9ca3af; }
+.atlas-rmp-section-instructors .atlas-rmp-tba { font-style: italic; color: #9ca3af; }
+.atlas-rmp-tba { font-style: italic; color: #9ca3af; }
+
 .atlas-rmp-loading {
   margin-top: 8px;
   padding-top: 6px;
