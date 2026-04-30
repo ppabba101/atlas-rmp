@@ -687,10 +687,11 @@ async function processCard(job) {
 
     const finalAuthFailed = authFailed || [...nameToResult.values()].some((r) => r?.reason === "auth-failed");
     renderSectionList(card, sections || [], nameToResult, finalAuthFailed);
-    card.setAttribute(ATLAS_ENRICH_ATTR, "done");
+    // Attribute already holds detailUrl (set in enrichSearchResults) — keep it
+    // as-is so future scans on the same card+URL don't re-enrich.
   } catch (e) {
     console.warn("[atlas-rmp] enrichment failed for", courseCode, e);
-    // Leave the card in 'pending' so a future scan can retry on next mutation
+    // Clear the attribute so a future scan can retry this card.
     card.removeAttribute(ATLAS_ENRICH_ATTR);
     const loading = card.querySelector(".atlas-rmp-loading");
     if (loading) loading.remove();
@@ -723,16 +724,26 @@ function enrichSearchResults() {
 
   const cards = document.querySelectorAll(".bookmarkable-card");
   for (const card of cards) {
-    if (card.hasAttribute(ATLAS_ENRICH_ATTR)) continue;
-
     const link = card.querySelector("a");
     const detailUrl = link?.href;
     if (!detailUrl) continue;
 
+    // Atlas paginates by reusing the same .bookmarkable-card DOM elements
+    // (Vue v-for) and just swapping the inner course data. Compare the card's
+    // current link.href against the URL we last enriched it for; if they
+    // differ (or the attribute is missing), the card is showing a NEW course
+    // and needs to be re-enriched.
+    if (card.getAttribute(ATLAS_ENRICH_ATTR) === detailUrl) continue;
+
     const courseCode = extractCourseCode(card);
     if (!courseCode) continue;
 
-    card.setAttribute(ATLAS_ENRICH_ATTR, "pending");
+    // Stale render from previous page — remove before re-enriching so the
+    // loading state replaces it cleanly.
+    const stale = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty");
+    if (stale) stale.remove();
+
+    card.setAttribute(ATLAS_ENRICH_ATTR, detailUrl);
     enrichQueue.push({ card, detailUrl, courseCode });
   }
 
