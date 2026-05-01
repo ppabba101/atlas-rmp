@@ -10,7 +10,12 @@ import { getCached, setCached } from "./lib/cache.js";
 const SCHOOL_ID_KEY = "rmp:schoolId";
 
 // Module-scope promise lock: prevents concurrent startups from firing duplicate
-// school-search requests before the first response is cached.
+// school-search requests before the first response is cached. Intentionally
+// only cleared on FAILURE — on success the resolved promise is held for the
+// service worker's lifetime, which is fine because the school ID effectively
+// never changes (RMP would have to renumber their school graph) and MV3's
+// short worker lifecycle re-resolves it from chrome.storage.local on
+// virtually every cold start anyway.
 let schoolIdPromise = null;
 
 /**
