@@ -311,6 +311,32 @@ function badgeHTML(result, authFailed) {
 
 // ─── Annotation ─────────────────────────────────────────────────────────────
 
+// ─── Mutation guards / generation counter ──────────────────────────────────
+//
+// The MutationObserver below watches document.body subtree to catch Atlas's
+// SPA re-renders. Without a guard, every badge or wrapper we inject would
+// also trip the observer, queueing another scan() — wasteful on pages with
+// hundreds of cards. `isExtensionMutating` is set while we're injecting our
+// own DOM and reset in a microtask, which fires AFTER the observer's own
+// (also microtask-queued) callback for the mutations we just made.
+//
+// `stripGeneration` is bumped on every removeAllAnnotations() so async
+// processCard fetches that began before a page-toggle-off can detect the
+// strip and bail without re-injecting their loading rows.
+
+let isExtensionMutating = false;
+let stripGeneration = 0;
+
+function beginExtensionMutation() {
+  isExtensionMutating = true;
+}
+
+function endExtensionMutation() {
+  // queueMicrotask so this runs AFTER the observer's callback (the observer
+  // schedules its own microtask when our mutations are recorded).
+  queueMicrotask(() => { isExtensionMutating = false; });
+}
+
 /**
  * Find the deepest descendant of `el` whose textContent equals the name.
  * Returns `el` itself when there's no matching descendant (e.g., the link
@@ -353,29 +379,43 @@ function findBadgeAnchor(el, name) {
  * @param {string} html - badgeHTML output
  */
 function insertBadge(el, name, html) {
-  // Already wrapped from a prior pass — just keep the badge next to the link.
-  if (el.parentElement?.classList.contains("atlas-rmp-wrap")) {
+  // Mark our own DOM mutations so the MutationObserver doesn't bounce them
+  // back as another scan. The flag is reset in a microtask once all
+  // synchronous mutations from this insert finish.
+  beginExtensionMutation();
+  try {
+    // Already wrapped from a prior pass — strip any leftover badge from the
+    // wrapper before inserting. Without this, a re-annotation that arrives
+    // while a previous badge is still in the DOM (e.g., BADGE_ATTR was lost
+    // during a Vue rerender) would produce doubled badges like "4.44.4".
+    if (el.parentElement?.classList.contains("atlas-rmp-wrap")) {
+      for (const stale of el.parentElement.querySelectorAll(".rmp-badge")) {
+        stale.remove();
+      }
+      el.insertAdjacentHTML("afterend", html);
+      return;
+    }
+
+    const inner = findBadgeAnchor(el, name);
+    if (inner !== el) {
+      inner.insertAdjacentHTML("afterend", html);
+      return;
+    }
+
+    const parent = el.parentElement;
+    if (parent) {
+      const wrap = document.createElement("span");
+      wrap.className = "atlas-rmp-wrap";
+      parent.insertBefore(wrap, el);
+      wrap.appendChild(el);
+      wrap.insertAdjacentHTML("beforeend", html);
+      return;
+    }
+
     el.insertAdjacentHTML("afterend", html);
-    return;
+  } finally {
+    endExtensionMutation();
   }
-
-  const inner = findBadgeAnchor(el, name);
-  if (inner !== el) {
-    inner.insertAdjacentHTML("afterend", html);
-    return;
-  }
-
-  const parent = el.parentElement;
-  if (parent) {
-    const wrap = document.createElement("span");
-    wrap.className = "atlas-rmp-wrap";
-    parent.insertBefore(wrap, el);
-    wrap.appendChild(el);
-    wrap.insertAdjacentHTML("beforeend", html);
-    return;
-  }
-
-  el.insertAdjacentHTML("afterend", html);
 }
 
 /**
@@ -835,6 +875,7 @@ function statusLabel(status) {
  * @param {boolean} authFailed
  */
 function renderSectionList(card, sections, nameToResult, authFailed) {
+  beginExtensionMutation();
   const target = card.querySelector(".card-content") ?? card;
   const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
   if (prior) prior.remove();
@@ -853,6 +894,7 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
     empty.className = "atlas-rmp-instructors-empty";
     empty.textContent = "No instructors posted yet for this term";
     target.appendChild(empty);
+    endExtensionMutation();
     return;
   }
 
@@ -963,6 +1005,7 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
 
   wrapper.appendChild(list);
   target.appendChild(wrapper);
+  endExtensionMutation();
 }
 
 /**
@@ -970,6 +1013,7 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
  * flight. Replaced by renderSectionList() once results arrive.
  */
 function renderLoadingState(card) {
+  beginExtensionMutation();
   const target = card.querySelector(".card-content") ?? card;
   const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
   if (prior) prior.remove();
@@ -977,6 +1021,7 @@ function renderLoadingState(card) {
   loading.className = "atlas-rmp-loading";
   loading.textContent = "Loading instructors...";
   target.appendChild(loading);
+  endExtensionMutation();
 }
 
 /**
@@ -987,6 +1032,10 @@ function renderLoadingState(card) {
  */
 async function processCard(job) {
   const { card, detailUrl, courseCode } = job;
+  // Capture the strip generation at job start. If removeAllAnnotations() runs
+  // (e.g., the user toggles Browse Courses off mid-fetch) the global counter
+  // moves; bail before re-injecting a section list into a cleared DOM.
+  const myGen = stripGeneration;
 
   try {
     renderLoadingState(card);
@@ -1148,10 +1197,13 @@ async function processCard(job) {
       for (const [n, r] of resolved) nameToResult.set(n, r);
     }
 
-    // Race guard: the user may have toggled Browse Courses off (or navigated
-    // away) while we were fetching. Skip rendering — the page-toggle handler
-    // already ran removeAllAnnotations to clear in-flight loading rows.
-    if (SETTINGS.enabledPages?.["search-results"] === false ||
+    // Race guard: the user may have toggled Browse Courses off, navigated
+    // away, or otherwise tripped removeAllAnnotations() while we were
+    // fetching. The strip-generation check covers ALL strip causes; the
+    // explicit page-enable / page-type check is a belt-and-braces for cases
+    // where settings change without going through removeAllAnnotations.
+    if (myGen !== stripGeneration ||
+        SETTINGS.enabledPages?.["search-results"] === false ||
         detectPageType() !== "search-results") {
       card.removeAttribute(ATLAS_ENRICH_ATTR);
       const loading = card.querySelector(".atlas-rmp-loading");
@@ -1329,16 +1381,20 @@ function debouncedScan() {
 }
 
 // Atlas may re-render existing text nodes via virtual-DOM diffing rather than
-// adding new nodes; characterData catches text mutations that childList misses
-// (spec line 111).
-const observer = new MutationObserver(debouncedScan);
+// adding new nodes; characterData catches text mutations that childList misses.
+// Started in init() once SETTINGS are loaded so the first scan doesn't run
+// with default settings on a slow-loading page.
+const observer = new MutationObserver(() => {
+  if (isExtensionMutating) return; // skip mutations we caused ourselves
+  debouncedScan();
+});
 
-observer.observe(document.body, {
+const OBSERVER_OPTIONS = {
   childList: true,
   subtree: true,
   characterData: true,
   characterDataOldValue: true,
-});
+};
 
 // ─── DOM cleanup ────────────────────────────────────────────────────────────
 
@@ -1360,8 +1416,14 @@ observer.observe(document.body, {
  * toggles the page back on), settings, RMP token.
  */
 function removeAllAnnotations(root) {
+  // Bump the strip generation so any in-flight processCard() that was
+  // queued or already mid-fetch will fail its generation-match guard before
+  // re-injecting a section list into the cleared DOM.
+  stripGeneration++;
+
   const r = root || document.body;
 
+  beginExtensionMutation();
   // 1. Badges
   for (const badge of r.querySelectorAll(".rmp-badge")) badge.remove();
 
@@ -1410,6 +1472,8 @@ function removeAllAnnotations(root) {
     card.style.display = "";
     delete card.dataset.atlasRmpDisplayHide;
   }
+
+  endExtensionMutation();
 }
 
 // ─── Settings live updates ──────────────────────────────────────────────────
@@ -1420,6 +1484,9 @@ function removeAllAnnotations(root) {
 //     so the page returns to native instantly without a reload.
 //   • ON for the current page  → re-scan + re-enrich so badges return.
 //   • Other pages' toggles do nothing here; they apply on next visit.
+//
+// Each downstream action (scan / re-enrich / apply-filters) runs at most
+// once per change batch — collected as flags first, executed after.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   const watchedFilters = Object.values(SETTING_KEYS);
@@ -1433,25 +1500,24 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const currentPageKey  = currentPageType ? PAGE_ENABLE_KEYS[currentPageType] : null;
     const currentPageToggleChanged = currentPageKey && changes[currentPageKey];
 
-    if (currentPageToggleChanged) {
-      const enabled = SETTINGS.enabledPages?.[currentPageType] !== false;
-      if (!enabled) {
-        // Toggled OFF for the page we're on — strip everything and stop.
-        removeAllAnnotations(document.body);
-        return;
-      }
-      // Toggled ON — fall through to re-scan + re-enrich below.
+    if (currentPageToggleChanged && SETTINGS.enabledPages?.[currentPageType] === false) {
+      // Toggled OFF for the page we're on — strip everything and stop.
+      removeAllAnnotations(document.body);
+      return;
     }
 
-    applyFiltersToDom();
+    // Decide what to do, then do each thing once.
+    let needScan       = false;
+    let needReenrich   = false;
+    const needFilters  = true; // always cheap, always safe
 
-    if (changes[SETTING_KEYS.hideEmptyCards]) {
-      invalidateAllEnrichments();
-      debouncedEnrich();
-    }
+    if (pageChanged) needScan = true;                        // toggled-on or other-page change
+    if (changes[SETTING_KEYS.hideEmptyCards]) needReenrich = true;
+    if (pageChanged) needReenrich = true;
 
-    if (pageChanged) {
-      scan(document.body);
+    if (needFilters) applyFiltersToDom();
+    if (needScan) scan(document.body);
+    if (needReenrich) {
       invalidateAllEnrichments();
       debouncedEnrich();
     }
@@ -1464,6 +1530,9 @@ async function init() {
   await loadSettings();
   scan(document.body);
   applyFiltersToDom();
+  // Start observing only after settings are loaded so the very first scan
+  // doesn't run against default (all-pages-enabled) settings on a slow page.
+  observer.observe(document.body, OBSERVER_OPTIONS);
 }
 
 if (document.readyState === "loading") {
