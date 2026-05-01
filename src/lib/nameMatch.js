@@ -177,15 +177,52 @@ function firstNameMatch(a, b) {
 }
 
 /**
+ * Whether two last-name strings refer to the same surname, allowing for
+ * multi-word surnames that get split differently between Atlas and RMP.
+ *
+ * Atlas's splitName treats only the trailing word as the surname (so
+ * "Raed Al Kontar" → first="raed al", last="kontar"), but RMP often stores
+ * particle-prefixed surnames whole (firstName="Raed", lastName="Al Kontar").
+ * Without this helper the exact-string compare drops valid matches.
+ *
+ * Accepts:
+ *   - exact equality
+ *   - one side is the trailing-token suffix of the other (space-aligned)
+ */
+function lastNameMatches(atlasLast, rmpLast) {
+  if (!atlasLast || !rmpLast) return false;
+  if (atlasLast === rmpLast) return true;
+  if (rmpLast.endsWith(" " + atlasLast)) return true;
+  if (atlasLast.endsWith(" " + rmpLast)) return true;
+  return false;
+}
+
+/**
+ * Whether the full normalized name token-sets are equal regardless of how
+ * Atlas and RMP partitioned them into first/last. "Raed Al Kontar" matches
+ * whether RMP stored it as ("Raed", "Al Kontar") or ("Raed Al", "Kontar").
+ */
+function tokenSetEquals(atlasFull, rmpFull) {
+  const a = atlasFull.split(/\s+/).filter(Boolean);
+  const b = rmpFull.split(/\s+/).filter(Boolean);
+  if (a.length === 0 || a.length !== b.length) return false;
+  const aSet = new Set(a);
+  for (const t of b) if (!aSet.has(t)) return false;
+  return true;
+}
+
+/**
  * Pick the best RMP match for an Atlas name.
- * Hard last-name gate: last name must match (exact or very close).
+ * Last-name gate: must match by exact equality OR multi-word suffix
+ * (handles Arabic/Dutch/Spanish particle surnames split across firstName).
  * Returns {node, confidence} or null if no match meets 0.8 floor.
  *
  * Confidence scoring:
- *   1.00 — exact last + exact first
- *   0.95 — exact last + nickname/canonical first match
- *   0.85 — exact last + partial first (prefix)
- *   0.80 — exact last + first initial only
+ *   1.00 — full-name token sets equal (covers any first/last partitioning)
+ *   1.00 — last match + exact first
+ *   0.95 — last match + nickname/canonical first match
+ *   0.85 — last match + partial first (prefix)
+ *   0.80 — last match + first initial only, or last-only with no atlasFirst
  *   null  — last name doesn't match or confidence < 0.80
  *
  * @param {string} atlasName - Name as rendered on Atlas
@@ -195,7 +232,8 @@ function firstNameMatch(a, b) {
 export function pickBestMatch(atlasName, rmpNodes) {
   if (!atlasName || !rmpNodes || rmpNodes.length === 0) return null;
 
-  const { first: atlasFirst, last: atlasLast } = splitName(normalize(atlasName));
+  const atlasFull = normalize(atlasName);
+  const { first: atlasFirst, last: atlasLast } = splitName(atlasFull);
 
   if (!atlasLast) return null;
 
@@ -206,41 +244,48 @@ export function pickBestMatch(atlasName, rmpNodes) {
     const node = edge.node ?? edge;
     const rmpFirst = (node.firstName ?? "").toLowerCase().trim();
     const rmpLast = (node.lastName ?? "").toLowerCase().trim();
-
-    // Hard last-name gate
-    if (rmpLast !== atlasLast) continue;
+    const rmpFull = (rmpFirst + " " + rmpLast).trim();
 
     let confidence = 0;
 
-    if (!atlasFirst) {
-      // No first name available — last-name-only match at 0.80
-      confidence = 0.80;
-    } else {
-      const normAtlasFirst = normalize(atlasFirst);
-      const normRmpFirst = normalize(rmpFirst);
-
-      if (normAtlasFirst === normRmpFirst) {
-        // Exact first name match
-        confidence = 1.00;
-      } else if (firstNameMatch(normAtlasFirst, normRmpFirst)) {
-        // Nickname or canonical match
-        confidence = 0.95;
+    // Highest-confidence path: token-set equality across the whole name. This
+    // captures "Raed Al Kontar" no matter which side of the comma each token
+    // landed on after first/last partitioning.
+    if (tokenSetEquals(atlasFull, rmpFull)) {
+      confidence = 1.00;
+    } else if (lastNameMatches(atlasLast, rmpLast)) {
+      if (!atlasFirst) {
+        // No first name available — last-name-only match at 0.80
+        confidence = 0.80;
       } else {
-        // Partial prefix match
-        const aShort = normAtlasFirst.replace(/\.$/, "");
-        const bShort = normRmpFirst.replace(/\.$/, "");
-        if (
-          (aShort.length >= 2 && bShort.startsWith(aShort)) ||
-          (bShort.length >= 2 && aShort.startsWith(bShort))
-        ) {
-          confidence = 0.85;
-        } else if (aShort.length === 1 || bShort.length === 1) {
-          // Single initial match
-          if (aShort[0] === bShort[0]) {
-            confidence = 0.80;
+        const normAtlasFirst = normalize(atlasFirst);
+        const normRmpFirst = normalize(rmpFirst);
+
+        if (normAtlasFirst === normRmpFirst) {
+          // Exact first name match
+          confidence = 1.00;
+        } else if (firstNameMatch(normAtlasFirst, normRmpFirst)) {
+          // Nickname or canonical match
+          confidence = 0.95;
+        } else {
+          // Partial prefix match
+          const aShort = normAtlasFirst.replace(/\.$/, "");
+          const bShort = normRmpFirst.replace(/\.$/, "");
+          if (
+            (aShort.length >= 2 && bShort.startsWith(aShort)) ||
+            (bShort.length >= 2 && aShort.startsWith(bShort))
+          ) {
+            confidence = 0.85;
+          } else if (aShort.length === 1 || bShort.length === 1) {
+            // Single initial match
+            if (aShort[0] === bShort[0]) {
+              confidence = 0.80;
+            }
           }
         }
       }
+    } else {
+      continue;
     }
 
     if (confidence >= 0.80 && confidence > bestConfidence) {
