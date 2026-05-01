@@ -7,6 +7,27 @@
     /* Atlas-style options page. Mimics atlas.ai.umich.edu's body + wrapper +
        card-container layout (no Typekit dep — system-ui only). Atlas eval-card
        palette is reused for status chips. */
+    @font-face {
+      font-family: "Usual";
+      src: url("fonts/Usual-Regular.otf") format("opentype");
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "Usual";
+      src: url("fonts/Usual-Italic.otf") format("opentype");
+      font-weight: 400; font-style: italic; font-display: swap;
+    }
+    @font-face {
+      font-family: "Usual";
+      src: url("fonts/Usual-Bold.otf") format("opentype");
+      font-weight: 700; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "Usual";
+      src: url("fonts/Usual-BoldItalic.otf") format("opentype");
+      font-weight: 700; font-style: italic; font-display: swap;
+    }
+
     :root {
       --umich-blue:   #00274C;
       --umich-maize:  #FFCB05;
@@ -15,56 +36,47 @@
       --blue:         #245389;
       --purple:       #8f29ad;
       --orange:       #ba5b00;
-      --bg-page:      #f4f5f7;
+      --bg-page:      #e8ebee;
       --bg-card:      #ffffff;
       --bg-input:     #fafafa;
-      --fg:           #1f2937;
+      --fg:           #000000;
       --fg-muted:     #6b7280;
       --border:       #e5e7eb;
-      --shadow:       0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
+      --shadow:       0 6px 27px #aeb4be;
     }
 
     * { box-sizing: border-box; }
 
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Usual", Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 0;
       background: var(--bg-page);
       color: var(--fg);
-      line-height: 1.5;
-    }
-
-    .nav-bar {
-      background: var(--umich-blue);
-      color: white;
-      padding: 16px 24px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .nav-bar img { width: 32px; height: 32px; border-radius: 6px; }
-    .nav-bar h1 {
-      margin: 0;
-      font-size: 1.05em;
-      font-weight: 600;
-      letter-spacing: 0.01em;
+      font-size: 14px;
+      line-height: 1.42857;
     }
 
     .wrapper {
-      max-width: 720px;
+      max-width: 760px;
       margin: 0 auto;
-      padding: 24px 20px 64px;
+      padding: 12px 0 24px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
     }
 
+    /* Atlas-inspired card-container — only the corners + shadow are copied;
+       margin/padding are tighter than Atlas's site since this is an
+       extension page, not a full-width app shell. */
     .card-container {
       background: var(--bg-card);
       border-radius: 8px;
+      -webkit-box-shadow: var(--shadow);
+      -moz-box-shadow: var(--shadow);
       box-shadow: var(--shadow);
-      padding: 20px 22px;
+      padding: 16px 20px 18px;
+      margin: 8px 16px;
+      position: relative;
     }
 
     .text-med {
@@ -239,12 +251,11 @@
   </style>
 </head>
 <body>
-  <div class="nav-bar">
-    <img src="../icons/icon48.png" alt="" />
-    <h1>Atlas &times; RMP — Options</h1>
-  </div>
-
   <div class="wrapper">
+    <div class="card-container" style="display:flex;align-items:center;gap:12px;padding:1em 1.5em;">
+      <img src="../icons/icon48.png" alt="" style="width:32px;height:32px;border-radius:6px;" />
+      <h1 style="margin:0;font-size:1.05em;font-weight:600;letter-spacing:0.01em;">Atlas &times; RMP — Options</h1>
+    </div>
     <!-- ─── Token ────────────────────────────────────────────────────────── -->
     <div class="card-container">
       <h3 class="text-med">RMP authorization token</h3>
