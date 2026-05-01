@@ -1,16 +1,18 @@
 // RMP GraphQL client for Atlas x RMP extension
 
+import { RMP_AUTH_KEY } from "./keys.js";
+
 // Day-0 default auth token. Used as a fallback when chrome.storage.local
 // "rmp:authToken" is unset (e.g. on a fresh install before the user opens the
 // Options page). Anyone using the extension out-of-the-box gets the same
 // public test token shipped with RMP's web client.
 export const RMP_DEFAULT_AUTH = "Basic dGVzdDp0ZXN0";
-export const RMP_AUTH_STORAGE_KEY = "rmp:authToken";
 export const RMP_ENDPOINT = "https://www.ratemyprofessors.com/graphql";
 export const SCHOOL_QUERY_TEXT = "University of Michigan Ann Arbor";
 
-// Module-scope cache: avoids repeated chrome.storage.local reads on every gql()
-// call. Invalidated by clearRmpAuthCache() when the user saves a new token.
+// Module-scope cache: avoids repeated chrome.storage.local reads on every
+// gql() call. Auto-invalidated by the storage.onChanged listener below
+// whenever the user saves a new token.
 let cachedAuth = null;
 
 /**
@@ -23,8 +25,8 @@ export async function getRmpAuth() {
   if (cachedAuth) return cachedAuth;
   return new Promise((resolve) => {
     try {
-      chrome.storage.local.get(RMP_AUTH_STORAGE_KEY, (result) => {
-        const stored = result?.[RMP_AUTH_STORAGE_KEY];
+      chrome.storage.local.get(RMP_AUTH_KEY, (result) => {
+        const stored = result?.[RMP_AUTH_KEY];
         cachedAuth =
           typeof stored === "string" && stored.trim().length > 0
             ? stored.trim()
@@ -44,7 +46,7 @@ export async function getRmpAuth() {
 try {
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "local" && changes[RMP_AUTH_STORAGE_KEY]) {
+      if (area === "local" && changes[RMP_AUTH_KEY]) {
         cachedAuth = null;
       }
     });

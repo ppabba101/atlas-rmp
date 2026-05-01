@@ -1,36 +1,16 @@
 // Toolbar popup for Atlas x RMP — quick filter toggles + per-page enable
-// toggles + token/cache status. Same chrome.storage.local keys as options.js
-// so changes propagate to content.js and the Options page automatically.
+// toggles + token/cache status. Loaded as an ES module from popup.html so
+// constants can come from src/lib/.
 
-const RMP_AUTH_KEY     = "rmp:authToken";
-const RMP_DEFAULT_AUTH = "Basic dGVzdDp0ZXN0";
-const AUTH_FAILED_KEY  = "rmp:authFailed";
-const CG_AUTH_KEY      = "cg:authNeeded";
-
-const PREF_KEYS = {
-  hideClosedSections:     "setting:hideClosedSections",
-  hideWaitlistedSections: "setting:hideWaitlistedSections",
-  hideEmptyCards:         "setting:hideEmptyCards",
-  minRmpRating:           "setting:minRmpRating",
-};
-
-// Per-page toggles. Default: all true. Mirrored in options.js + content.js.
-const PAGE_KEYS = {
-  courseDetail:      "setting:enableOnCourseDetail",
-  instructorProfile: "setting:enableOnInstructorProfile",
-  searchResults:     "setting:enableOnSearchResults",
-  scheduleBuilder:   "setting:enableOnScheduleBuilder",
-  courseGuide:       "setting:enableOnCourseGuide",
-  browseInstructors: "setting:enableOnBrowseInstructors",
-};
-
-// chrome.storage entries that count as transient cache, safe to wipe:
-//   prof:*          — RMP per-professor lookup (incl. negative caches), 7d TTL
-//   atlas:detail:*  — Atlas section-table-data per course/term, 24h TTL
-//   cg:section:*    — LSA Course Guide waitlist cross-reference, 24h TTL
-// Explicitly excluded: rmp:schoolId (one expensive lookup, rarely changes),
-// rmp:authToken (user-supplied), auth-fail flags, and setting:* prefs.
-const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:"];
+import {
+  SETTING_KEYS as PREF_KEYS,
+  PAGE_TOGGLE_KEYS as PAGE_KEYS,
+  CACHE_KEY_PREFIXES,
+  RMP_AUTH_KEY,
+  AUTH_FAILED_KEY,
+  CG_AUTH_KEY,
+} from "./lib/keys.js";
+import { RMP_DEFAULT_AUTH } from "./lib/rmp.js";
 
 const $ = (id) => document.getElementById(id);
 

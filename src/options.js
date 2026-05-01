@@ -1,29 +1,14 @@
 // Options page for Atlas x RMP — manages RMP auth token, display preferences,
-// per-page toggles, and cache. Uses chrome.storage.local for all persistence;
-// the same keys are read by background.js, content.js, and popup.js.
+// per-page toggles, and cache. Loaded as an ES module from options.html so
+// constants come from src/lib/.
 
-const RMP_AUTH_KEY      = "rmp:authToken";
-const RMP_DEFAULT_AUTH  = "Basic dGVzdDp0ZXN0";
-const RMP_ENDPOINT      = "https://www.ratemyprofessors.com/graphql";
-
-const PREF_KEYS = {
-  hideClosedSections:     "setting:hideClosedSections",
-  hideWaitlistedSections: "setting:hideWaitlistedSections",
-  hideEmptyCards:         "setting:hideEmptyCards",
-  minRmpRating:           "setting:minRmpRating",
-};
-
-const PAGE_KEYS = {
-  courseDetail:      "setting:enableOnCourseDetail",
-  instructorProfile: "setting:enableOnInstructorProfile",
-  searchResults:     "setting:enableOnSearchResults",
-  scheduleBuilder:   "setting:enableOnScheduleBuilder",
-  courseGuide:       "setting:enableOnCourseGuide",
-  browseInstructors: "setting:enableOnBrowseInstructors",
-};
-
-// Mirror of the popup's cache list. See popup.js for the full prefix table.
-const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:"];
+import {
+  SETTING_KEYS as PREF_KEYS,
+  PAGE_TOGGLE_KEYS as PAGE_KEYS,
+  CACHE_KEY_PREFIXES,
+  RMP_AUTH_KEY,
+} from "./lib/keys.js";
+import { RMP_DEFAULT_AUTH, RMP_ENDPOINT } from "./lib/rmp.js";
 
 // Trivial GraphQL ping used by the "Test token" button. Asks RMP for one school
 // matching "University of Michigan Ann Arbor" — small payload, exercises auth.

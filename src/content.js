@@ -69,6 +69,9 @@ const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
 // page and the toolbar popup. Read on page load and refreshed live via
 // chrome.storage.onChanged. CSS in inject.css does the actual hiding.
 
+// MUST stay in sync with src/lib/keys.js. Content scripts can't `import` from
+// shared modules without bundling, so the key strings are duplicated here.
+// When you add or rename a setting, update both this file and lib/keys.js.
 const SETTING_KEYS = {
   hideClosedSections:     "setting:hideClosedSections",
   hideWaitlistedSections: "setting:hideWaitlistedSections",
@@ -76,8 +79,9 @@ const SETTING_KEYS = {
   minRmpRating:           "setting:minRmpRating",
 };
 
-// Per-page enable toggles. detectPageType() return value → key. Defaults to true
-// when the storage entry is missing (only strict `false` disables annotation).
+// Per-page enable toggles. detectPageType() return value → key. Defaults to
+// true when the storage entry is missing (only strict `false` disables).
+// Keep aligned with lib/keys.js PAGE_TOGGLE_DEFS.
 const PAGE_ENABLE_KEYS = {
   "course-detail":       "setting:enableOnCourseDetail",
   "instructor-profile":  "setting:enableOnInstructorProfile",
