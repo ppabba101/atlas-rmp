@@ -25,13 +25,12 @@ const PAGE_KEYS = {
 };
 
 // chrome.storage entries that count as transient cache, safe to wipe:
-//   prof:*          — RMP per-professor lookup (incl. negative caches)
-//   atlas:detail:*  — Atlas section-table-data per course/term (24h TTL)
-//   cg:section:*    — LSA Course Guide waitlist cross-reference (24h TTL)
-//   atlas:course:*  — opportunistic course-row harvest
-// Explicitly excluded: rmp:schoolId (one expensive lookup, never goes stale),
+//   prof:*          — RMP per-professor lookup (incl. negative caches), 7d TTL
+//   atlas:detail:*  — Atlas section-table-data per course/term, 24h TTL
+//   cg:section:*    — LSA Course Guide waitlist cross-reference, 24h TTL
+// Explicitly excluded: rmp:schoolId (one expensive lookup, rarely changes),
 // rmp:authToken (user-supplied), auth-fail flags, and setting:* prefs.
-const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:", "atlas:course:"];
+const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:"];
 
 const $ = (id) => document.getElementById(id);
 

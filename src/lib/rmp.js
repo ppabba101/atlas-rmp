@@ -39,15 +39,6 @@ export async function getRmpAuth() {
   });
 }
 
-/**
- * Clear the module-scope auth cache. Call this when the user saves a new token
- * via the Options page so the next gql() picks up the new value without a
- * service-worker restart.
- */
-export function clearRmpAuthCache() {
-  cachedAuth = null;
-}
-
 // Listen for storage changes so a token update from the Options/Popup page
 // invalidates the cache automatically. Guarded for non-extension contexts.
 try {

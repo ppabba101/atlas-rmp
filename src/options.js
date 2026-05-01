@@ -23,7 +23,7 @@ const PAGE_KEYS = {
 };
 
 // Mirror of the popup's cache list. See popup.js for the full prefix table.
-const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:", "atlas:course:"];
+const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:", "cg:section:"];
 
 // Trivial GraphQL ping used by the "Test token" button. Asks RMP for one school
 // matching "University of Michigan Ann Arbor" — small payload, exercises auth.

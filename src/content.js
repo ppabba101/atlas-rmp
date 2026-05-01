@@ -1,82 +1,50 @@
 // Atlas x RMP content script — SPA-aware DOM injection
 
 // ─── Selectors ─────────────────────────────────────────────────────────────
-// PLACEHOLDER selectors — verify with Step 0 discovery spike on live Atlas.
-// Replace each value after running DevTools discovery queries on each page type.
-// See selectors.md for the discovery worksheet.
-//
-// STEP 0 REMINDER (Workstream B / course harvesting):
-// The courseRow selector and its sub-selectors below are also placeholders.
-// Discover them alongside the instructor-name selectors by inspecting course
-// listing pages in Atlas DevTools. See selectors.md §"Atlas Course Row Selectors".
+// Per-page-type selectors for instructor-name elements. Atlas's markup is not
+// versioned or documented — every entry here is empirically observed and will
+// break if Atlas restructures its templates. When a page stops badging,
+// re-discover via DevTools (see CONTRIBUTING.md "Re-discovering selectors").
 const SELECTORS = {
-  // course-detail: instructor name links on individual course pages
-  // CONFIRMED via Step 0 discovery on ANTHRCUL 101 (2026-04-30): instructor names
-  // are <a> tags with href containing "/instructor/". Names are in "Last, First"
-  // format which splitName() already handles.
+  // course-detail: /courses/{CODE}/{TERM}/. Instructor names rendered as
+  // <a href="/instructor/..."> in "Last, First" format.
   "course-detail": [
     'a[href*="/instructor/"]',
   ],
 
-  // search-results: instructor names in course listing cards
-  // Same href pattern is used across Atlas for instructor links — try the
-  // confirmed selector first; if it doesn't match, run the discovery query
-  // (see selectors.md / README) on the search-results page and update.
+  // search-results: /courses/ (Browse Courses). Same href pattern, but cards
+  // are also enriched per-section by enrichSearchResults() below.
   "search-results": [
     'a[href*="/instructor/"]',
   ],
 
-  // instructor-profile: name heading on professor pages
-  // CONFIRMED via Step 0 discovery on Ryan Huang's profile (2026-04-30):
-  // instructor's name is in h1.text-large. Note: this selector runs on every
-  // Atlas page; if you see spurious badges on non-instructor pages with an
-  // h1.text-large, we'll need to add URL-based gating to scan().
+  // instructor-profile: /instructor/{ID}. The displayed name lives in the page
+  // heading. URL-gated in detectPageType() so this selector doesn't fire on
+  // unrelated pages that happen to use h1.text-large.
   "instructor-profile": [
     'h1.text-large',
   ],
 
-  // browse-instructors: Atlas Browse Instructors page (atlas.ai.umich.edu/instructors/)
-  // Each card is a <bookmarkable-card> whose primary link points at /instructor/...
-  // The <a> contains the instructor's name as its visible text.
+  // browse-instructors: /instructors/. Each <bookmarkable-card> contains an
+  // <a href="/instructor/..."> wrapping the instructor's display name.
   "browse-instructors": [
     'a[href*="/instructor/"]',
   ],
 
-  // course-guide: LSA Course Guide search results (webapps.lsa.umich.edu/cg/*)
-  // CONFIRMED via Step 0 discovery on Fall 2026 EECS results page (2026-04-30):
-  // every instructor is an <a href="mailto:..."> inside div.col-sm-3 whose
-  // parent is div.row.bottompadding_main. Scoped to that container so we don't
-  // false-positive on unrelated mailto links elsewhere.
+  // course-guide: webapps.lsa.umich.edu/cg/. Instructor email links inside the
+  // results table; scoped to .row.bottompadding_main so unrelated mailto links
+  // aren't false-matched.
   "course-guide": [
     'div.row.bottompadding_main a[href^="mailto:"]',
   ],
 
-  // schedule-builder: Atlas Schedule Builder (atlas.ai.umich.edu/schedule-builder/)
-  // CONFIRMED via Step 0 discovery on Fall 2026 plan (2026-04-30): each
-  // instructor name in a section block is an <a class="display-block text-xsmall">
-  // in "Last, First" format. "Instructor TBA" gets filtered by the comma-presence
-  // pre-check in annotate(). High-value page: live section status, seats, time,
-  // location, and the actual section instructor (not historical pool).
+  // schedule-builder: /schedule-builder/. Per-section instructor names render
+  // as <a class="display-block text-xsmall"> in "Last, First" format. Vue
+  // reuses these anchors during add/remove, so annotate() compares BADGE_ATTR
+  // against current text to avoid stale badges.
   "schedule-builder": [
     'a.display-block.text-xsmall',
   ],
-
-  // courseRow: smallest DOM element containing one complete course/section listing
-  // Used by captureAllCourses() for Workstream B Path b course harvesting.
-  // PLACEHOLDER — Step 0 discovery: inspect a search results page, walk up the DOM
-  // from any course code until you reach the element that holds ALL of: code,
-  // instructor, time. That element is courseRow.
-  courseRow: "[class*='course-row']",   // PLACEHOLDER — Step 0 discovery
-
-  // Sub-selectors within a courseRow element (all PLACEHOLDER — Step 0 discovery)
-  courseCode:     "[class*='course-code']",        // PLACEHOLDER — Step 0 discovery
-  courseTitle:    "[class*='course-title']",       // PLACEHOLDER — Step 0 discovery
-  courseTerm:     "[class*='term']",               // PLACEHOLDER — Step 0 discovery
-  courseSectionId:"[class*='section']",            // PLACEHOLDER — Step 0 discovery
-  courseInstructor:"[class*='instructor']",        // PLACEHOLDER — Step 0 discovery (may match instructor-name selector)
-  courseMeetingTime:"[class*='meeting-time'], [class*='meetingTime']", // PLACEHOLDER — Step 0 discovery
-  courseLocation: "[class*='location']",           // PLACEHOLDER — Step 0 discovery
-  courseCredits:  "[class*='credits']",            // PLACEHOLDER — Step 0 discovery
 };
 
 // Attribute set on elements after annotation to prevent double-badging
@@ -515,56 +483,6 @@ async function annotate(el) {
   }
 
   insertBadge(el, name, badgeHTML(result, newAuthFailed));
-}
-
-// ─── Course harvesting (Workstream B Path b) ────────────────────────────────
-
-/**
- * Read course data from a single course-row element and persist it to
- * chrome.storage.local. Fire-and-forget — no await needed at call sites.
- *
- * @param {Element} rowEl - A DOM element matching SELECTORS.courseRow
- */
-function captureCourseRow(rowEl) {
-  const text = (sel) => (rowEl.querySelector(sel)?.textContent ?? "").trim();
-
-  const courseCode   = text(SELECTORS.courseCode).toUpperCase().replace(/[\s/]/g, "");
-  const courseTitle  = text(SELECTORS.courseTitle);
-  const term         = text(SELECTORS.courseTerm).toUpperCase().replace(/[\s/]/g, "");
-  const sectionId    = text(SELECTORS.courseSectionId).toUpperCase().replace(/[\s/]/g, "");
-  const instructorName = text(SELECTORS.courseInstructor);
-  const meetingTime  = text(SELECTORS.courseMeetingTime);
-  const location     = text(SELECTORS.courseLocation);
-  const credits      = text(SELECTORS.courseCredits);
-
-  // Skip if the key fields are missing — not a real course row
-  if (!courseCode || !sectionId) return;
-
-  const key = `atlas:course:${courseCode}:${term}:${sectionId}`;
-  const data = { courseCode, courseTitle, term, sectionId, instructorName, meetingTime, location, credits, capturedAt: Date.now() };
-
-  chrome.storage.local.set({ [key]: data });
-  rowEl.setAttribute("data-atlas-captured", "true");
-}
-
-/**
- * Query all course rows under root and capture any not yet processed.
- *
- * @param {Element|Document} root
- */
-function captureAllCourses(root) {
-  let rows;
-  try {
-    rows = root.querySelectorAll(SELECTORS.courseRow);
-  } catch (e) {
-    // Invalid placeholder selector — skip silently
-    return;
-  }
-
-  for (const el of rows) {
-    if (el.getAttribute("data-atlas-captured") === "true") continue;
-    captureCourseRow(el);
-  }
 }
 
 // ─── LSA Course Guide cross-reference ───────────────────────────────────────
@@ -1370,20 +1288,10 @@ function scan(root) {
   // is enabled when the storage entry is missing (see loadSettings).
   if (SETTINGS.enabledPages && SETTINGS.enabledPages[pageType] === false) return;
 
-  // Only run selectors for the current page type. courseRow sub-selectors are
-  // plain strings (not arrays) and must not be queried as instructor-name
-  // elements — they're handled separately by captureAllCourses().
-  const selectors = Array.isArray(SELECTORS[pageType]) ? SELECTORS[pageType] : [];
+  const selectors = SELECTORS[pageType] ?? [];
 
   for (const selector of selectors) {
-    let elements;
-    try {
-      elements = root.querySelectorAll(selector);
-    } catch (e) {
-      // Invalid placeholder selector — skip silently
-      continue;
-    }
-
+    const elements = root.querySelectorAll(selector);
     for (const el of elements) {
       if (el.classList.contains("rmp-badge")) continue;
       const text = el.textContent?.trim() ?? "";
@@ -1396,13 +1304,7 @@ function scan(root) {
     }
   }
 
-  // Opportunistic course-data harvesting (Workstream B Path b) — only on
-  // pages where course rows exist (search-results / course-detail).
-  if (pageType === "search-results" || pageType === "course-detail") {
-    captureAllCourses(root);
-  }
-
-  // Atlas search-results enrichment (Option 2): only on Browse Courses pages.
+  // Atlas search-results enrichment: only on Browse Courses pages.
   if (pageType === "search-results") {
     debouncedEnrich();
   }
