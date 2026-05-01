@@ -579,19 +579,22 @@ async function fetchCgSectionData(courseCode, termCode, knownSections) {
       encodeURIComponent(`${termCode}${subject}${catalog}${sec}`) +
       `&termArray=f_${yy}_${termCode}`;
     try {
-      const res = await fetchWithTimeout(url, { credentials: "include" });
-      if (res.ok) {
-        const text = await res.text();
+      // Content-script fetches to webapps.lsa.umich.edu hit CORS even with
+      // host_permissions (the page's origin is atlas.ai.umich.edu and CG
+      // returns no Access-Control-Allow-Origin header). Route through the
+      // service worker which has unrestricted host_permission fetch access.
+      const reply = await chrome.runtime.sendMessage({ type: "FETCH_CG", url });
+      if (reply && reply.ok && typeof reply.body === "string") {
         // CG renders an error page when the content token doesn't resolve — it
         // still returns 200, but the section table is missing. The presence of
         // "clsschedulerow" is our signal that we got real data.
-        if (text.indexOf("clsschedulerow") !== -1) {
-          html = text;
+        if (reply.body.indexOf("clsschedulerow") !== -1) {
+          html = reply.body;
           break;
         }
       }
     } catch (e) {
-      console.warn("[atlas-rmp] CG fetch failed:", url, e.message);
+      console.warn("[atlas-rmp] CG sendMessage failed:", url, e.message);
     }
   }
   if (!html) return null;

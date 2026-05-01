@@ -77,6 +77,9 @@
       position: relative;
     }
 
+    a, a:visited { color: #3c6dea; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
     .text-med {
       font-size: 1em;
       font-weight: 600;
@@ -155,10 +158,10 @@
 </head>
 <body>
   <div class="wrapper">
-    <div class="card-container" style="display:flex;align-items:center;gap:10px;padding:1em 1.5em;">
-      <img src="../icons/icon48.png" alt="" style="width:28px;height:28px;border-radius:4px;" />
-      <span style="font-weight:600;font-size:1.05em;letter-spacing:0.01em;">Atlas &times; RMP</span>
-    </div>
+    <header style="display:flex;align-items:center;gap:10px;padding:14px 16px 4px;">
+      <img src="../icons/icon48.png" alt="" style="width:36px;height:36px;" />
+      <span style="font-weight:700;font-size:1.5em;letter-spacing:0.01em;color:#3c6dea;">Atlas &times; RMP</span>
+    </header>
     <div class="card-container">
       <h3 class="text-med">Token status</h3>
       <p class="text-small card-description">RMP authorization header used for lookups.</p>

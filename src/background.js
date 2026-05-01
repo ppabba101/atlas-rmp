@@ -187,6 +187,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
+// FETCH_CG handler: content scripts on atlas.ai.umich.edu can't fetch
+// webapps.lsa.umich.edu directly (no Access-Control-Allow-Origin header on
+// CG's responses; the browser blocks even with host_permissions in MV3).
+// The service worker has unrestricted host_permission fetch access, so we
+// proxy CG fetches here and return the raw HTML body to the content script.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "FETCH_CG") return false;
+  const { url } = message;
+  if (typeof url !== "string" || !url.startsWith("https://webapps.lsa.umich.edu/cg/")) {
+    sendResponse({ ok: false, error: "invalid-url" });
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+
+  fetch(url, { credentials: "include", signal: controller.signal })
+    .then(async (res) => {
+      const body = await res.text();
+      sendResponse({ ok: res.ok, status: res.status, finalUrl: res.url, body });
+    })
+    .catch((e) => {
+      sendResponse({ ok: false, error: e.message || String(e) });
+    })
+    .finally(() => clearTimeout(timer));
+
+  return true; // async
+});
+
 // On install: pre-warm the school ID cache
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[atlas-rmp] Extension installed — pre-warming school ID cache");
