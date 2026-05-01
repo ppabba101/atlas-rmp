@@ -97,8 +97,11 @@ export const TEACHER_SEARCH_QUERY = `
 
 /**
  * Execute a GraphQL query against RMP.
- * Improvement 3: On 401, set chrome.storage.local rmp:authFailed marker AND throw
- * a tagged error with error.code = "auth-failed".
+ *
+ * On 401: persist `rmp:authFailed` so content.js can paint the auth-expired
+ * badge, and throw a tagged error with `code === "auth-failed"`.
+ * On 200: clear `rmp:authFailed` so the auth-expired badge disappears as soon
+ * as the next call succeeds (covers the "RMP rotated back" recovery case).
  *
  * @param {string} query - GraphQL query string
  * @param {object} variables - Query variables
@@ -121,13 +124,18 @@ export async function gql(query, variables) {
   });
 
   if (response.status === 401) {
-    // Improvement 3: persist auth-fail marker for content.js badge rendering
     chrome.storage.local.set({ "rmp:authFailed": { ts: Date.now() } });
     const err = new Error(
       "RMP auth token returned 401 — update your token in the extension Options page"
     );
     err.code = "auth-failed";
     throw err;
+  }
+
+  // Auto-recover the auth-fail flag on success — saves the user a manual
+  // toggle if RMP's token rotates back to a working value.
+  if (response.ok) {
+    chrome.storage.local.remove("rmp:authFailed");
   }
 
   if (!response.ok) {

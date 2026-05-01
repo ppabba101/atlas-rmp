@@ -1,9 +1,3 @@
-// MV3 module compatibility note: This service worker uses ES modules ("type": "module" in manifest).
-// If Chrome rejects with a module-related error on load, fallback options are:
-//   (a) Switch to non-module worker + use importScripts() at top
-//   (b) Bundle lib/* into a single file via esbuild/webpack
-// Try modules first; only fall back if it actually breaks. See open-questions.md item 3.
-
 import {
   gql,
   SCHOOL_SEARCH_QUERY,
@@ -243,7 +237,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "FETCH_CG") return false;
   const { url } = message;
-  if (typeof url !== "string" || !url.startsWith("https://webapps.lsa.umich.edu/cg/")) {
+  // Parse + validate after normalization rather than relying on a raw
+  // startsWith check — that lets a path like /cg/../admin sneak through to
+  // an unrelated path on the same host. Reject anything that doesn't
+  // resolve to https://webapps.lsa.umich.edu/cg/* after URL canonicalisation.
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    sendResponse({ ok: false, error: "invalid-url" });
+    return true;
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "webapps.lsa.umich.edu" ||
+    !parsed.pathname.startsWith("/cg/")
+  ) {
     sendResponse({ ok: false, error: "invalid-url" });
     return true;
   }
