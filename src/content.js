@@ -185,11 +185,19 @@ function applyFiltersToDom() {
 
   // Per-card all-hidden check: if every section in the card's section list is
   // hidden by current filters, hide the entire card so no empty shell is shown.
+  // Uses inline style.display rather than a CSS attribute rule because Atlas's
+  // Vue framework also sets inline display on bookmarkable-card during render
+  // — inline-style-against-inline-style is the only reliable override.
   for (const card of document.querySelectorAll(".bookmarkable-card")) {
     const sections = card.querySelectorAll(".atlas-rmp-section");
     const total = sections.length;
     if (total === 0) {
+      // No section list rendered — leave card alone (might be loading state)
       card.removeAttribute("data-all-hidden");
+      if (card.dataset.atlasRmpDisplayHide === "true") {
+        card.style.display = "";
+        delete card.dataset.atlasRmpDisplayHide;
+      }
       continue;
     }
     let hiddenCount = 0;
@@ -201,7 +209,16 @@ function applyFiltersToDom() {
       const isBelowMin = sec.getAttribute("data-below-min") === "true";
       if (isClosed || isWait || isBelowMin) hiddenCount++;
     }
-    card.setAttribute("data-all-hidden", hiddenCount === total ? "true" : "false");
+    const allHidden = hiddenCount === total;
+    card.setAttribute("data-all-hidden", allHidden ? "true" : "false");
+    if (allHidden) {
+      card.style.display = "none";
+      card.dataset.atlasRmpDisplayHide = "true";
+    } else if (card.dataset.atlasRmpDisplayHide === "true") {
+      // We hid this card previously; restore default display.
+      card.style.display = "";
+      delete card.dataset.atlasRmpDisplayHide;
+    }
   }
 }
 
