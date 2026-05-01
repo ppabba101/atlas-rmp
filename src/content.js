@@ -444,6 +444,205 @@ function captureAllCourses(root) {
   }
 }
 
+// ─── LSA Course Guide cross-reference ───────────────────────────────────────
+//
+// Atlas's section-table-data API exposes status ("open"/"closed"/"wait list")
+// and open_seats but does NOT include waitlist counts. The LSA Course Guide
+// (CG) detail page does, so we cross-reference each card against CG to override
+// status + add waitlistCount.
+//
+// URL format (verified via archived snapshots — webapps.lsa.umich.edu/cg/):
+//   https://webapps.lsa.umich.edu/cg/cg_detail.aspx?content={TERM}{SUBJECT}{CATALOG}{SECTION}
+// Subject has no spaces (e.g. "AAS", "AMCULT", "BIOLOGY"), section is
+// zero-padded to 3 digits ("001", "100"). The termArray query param can be
+// added but isn't required for the detail page to render.
+//
+// Section table HTML shape (per row):
+//   <div class="row clsschedulerow ...">
+//     <div class="col-md-1">… <span>001 (LEC)</span></div>           // Section
+//     <div class="col-md-1">… &nbsp; </div>                          // Class Type (often blank)
+//     <div class="col-md-1">… 19632                  </div>           // Class No
+//     <div class="col-md-1">… <span class="badge badge-open">Open</span></div>
+//     <div class="col-md-1">… 170                    </div>           // Open Seats
+//     <div class="col-md-2">… &nbsp;                  </div>           // Open Restricted
+//     <div class="col-md-1">… 3                      </div>           // Waitlist ("-" if none)
+//     <div class="col-md-4">… meeting table          </div>
+//
+// Each cell also holds an <div class="hidden-md hidden-lg xs_label">Section:</div>
+// label that we anchor against to disambiguate cells when the column order
+// shifts in some layouts.
+
+/** Parse the visible numeric or text payload out of a CG cell, ignoring the
+ * mobile-only xs_label and any nested control glyphs. Returns trimmed text or
+ * null when the cell carries the placeholder "-" / "&nbsp;".
+ */
+function cgCellValue(cellEl) {
+  // Clone, strip xs_label divs (mobile labels) + clsschedulerow_xs_rowpadding spacers,
+  // then read remaining text.
+  const clone = cellEl.cloneNode(true);
+  for (const drop of clone.querySelectorAll(".xs_label, .clsschedulerow_xs_rowpadding, .fa")) {
+    drop.remove();
+  }
+  let text = (clone.textContent || "").replace(/ /g, " ").trim();
+  if (!text || text === "-") return null;
+  return text;
+}
+
+/** Map a CG enroll-status badge to the lowercase tokens Atlas uses. */
+function cgStatusToken(label) {
+  if (!label) return null;
+  const t = label.toLowerCase().trim();
+  if (t === "open") return "open";
+  if (t === "closed") return "closed";
+  if (t === "wait list" || t === "waitlist" || t === "wl") return "wait list";
+  return t;
+}
+
+/** Find the cell inside a clsschedulerow whose xs_label text starts with the
+ * given prefix (e.g. "Wait List", "Open Seats"). The xs_label div is hidden on
+ * desktop but always present in the markup, which makes it the most stable
+ * anchor when col-md-* widths shift.
+ */
+function cgFindCellByLabel(rowEl, prefix) {
+  const labels = rowEl.querySelectorAll(".xs_label");
+  for (const lbl of labels) {
+    const text = (lbl.textContent || "").trim().toLowerCase();
+    if (text.startsWith(prefix.toLowerCase())) {
+      // The cell is the closest col-md-* ancestor of the label.
+      let parent = lbl.parentElement;
+      while (parent && !/(^|\s)col-md-\d+(\s|$)/.test(parent.className)) {
+        parent = parent.parentElement;
+      }
+      return parent || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch the LSA Course Guide detail page for a course and parse a per-section
+ * map of authoritative status + waitlist info. Cached per course+term for 24h.
+ *
+ * @param {string} courseCode - "AAS 201" (single space, same shape Atlas uses)
+ * @param {string} termCode   - "2610"
+ * @param {Array<string>} [knownSections] - section numbers Atlas already
+ *   reported for this course. Used to skip the 001/100/… probe sequence and
+ *   hit a valid URL on the first request.
+ * @returns {Promise<Map<string, {status:string, openSeats:(number|null), waitlistCount:(number|null), classNumber:(string|null)}>|null>}
+ */
+async function fetchCgSectionData(courseCode, termCode, knownSections) {
+  if (!courseCode || !termCode) return null;
+  const cacheKey = `cg:section:${courseCode}:${termCode}`;
+  const cached = await getDetailCache(cacheKey);
+  if (cached && Array.isArray(cached.entries)) {
+    const m = new Map();
+    for (const [k, v] of cached.entries) m.set(k, v);
+    return m;
+  }
+
+  // Build the content= token. Subject is the alphabetic prefix (no spaces),
+  // catalog is whatever follows the space. CG renders all sections on the
+  // detail page regardless of which section is in `content=`, but the URL
+  // must point at a real section — an invalid section number returns the
+  // page shell with no .clsschedulerow rows. We probe likely candidates.
+  const parts = courseCode.split(/\s+/);
+  if (parts.length < 2) return null;
+  const subject = parts[0].replace(/[^A-Z0-9]/gi, "").toUpperCase();
+  const catalog = parts.slice(1).join("").replace(/\s+/g, "").toUpperCase();
+  // YY (first 2 digits of termCode) → modern UMich termArray prefix
+  // (e.g. 2610 → f_26_2610). termArray is documented as required for filtering
+  // back-links but the detail page renders without it; we include it anyway to
+  // mirror what Atlas links use.
+  const yy = termCode.length >= 2 ? termCode.slice(0, 2) : "";
+  // CG's detail page URL embeds a specific section number; an invalid number
+  // returns the page shell but no .clsschedulerow rows. Prefer section numbers
+  // Atlas already showed us — those are guaranteed valid. Fall back to the
+  // canonical first-section candidates (001, then 100/200/010/101 for cross-
+  // listed / grad / lab-paired courses).
+  const candidateSections = [];
+  if (Array.isArray(knownSections)) {
+    for (const s of knownSections) {
+      const padded = String(s).padStart(3, "0");
+      if (/^\d{3}$/.test(padded) && !candidateSections.includes(padded)) {
+        candidateSections.push(padded);
+      }
+    }
+  }
+  for (const s of ["001", "100", "200", "010", "101"]) {
+    if (!candidateSections.includes(s)) candidateSections.push(s);
+  }
+
+  let html = null;
+  for (const sec of candidateSections) {
+    const url =
+      "https://webapps.lsa.umich.edu/cg/cg_detail.aspx?content=" +
+      encodeURIComponent(`${termCode}${subject}${catalog}${sec}`) +
+      `&termArray=f_${yy}_${termCode}`;
+    try {
+      const res = await fetchWithTimeout(url, { credentials: "include" });
+      if (res.ok) {
+        const text = await res.text();
+        // CG renders an error page when the content token doesn't resolve — it
+        // still returns 200, but the section table is missing. The presence of
+        // "clsschedulerow" is our signal that we got real data.
+        if (text.indexOf("clsschedulerow") !== -1) {
+          html = text;
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn("[atlas-rmp] CG fetch failed:", url, e.message);
+    }
+  }
+  if (!html) return null;
+
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(html, "text/html");
+  } catch (e) {
+    console.warn("[atlas-rmp] CG parse failed:", e.message);
+    return null;
+  }
+
+  const map = new Map();
+  const rows = doc.querySelectorAll(".clsschedulerow");
+  for (const row of rows) {
+    // Section number — anchored on the xs_label "Section:". Inside the same
+    // col-md-1 there's a span like "001 (LEC)" or a badge with the same text.
+    const secCell = cgFindCellByLabel(row, "Section");
+    if (!secCell) continue;
+    const secRaw = cgCellValue(secCell);
+    if (!secRaw) continue;
+    // "001 (LEC)" or "001 (LEC) " → "001"
+    const secMatch = secRaw.match(/(\d{3})/);
+    if (!secMatch) continue;
+    const sectionNum = secMatch[1];
+
+    const statusCell = cgFindCellByLabel(row, "Enroll Stat");
+    const statusBadge = statusCell?.querySelector(".badge");
+    const statusText = (statusBadge?.textContent || cgCellValue(statusCell) || "").trim();
+    const status = cgStatusToken(statusText);
+
+    const openCell = cgFindCellByLabel(row, "Open Seats");
+    const openRaw = cgCellValue(openCell);
+    const openSeats = openRaw && /^\d+$/.test(openRaw) ? Number(openRaw) : null;
+
+    const wlCell = cgFindCellByLabel(row, "Wait List");
+    const wlRaw = cgCellValue(wlCell);
+    const waitlistCount = wlRaw && /^\d+$/.test(wlRaw) ? Number(wlRaw) : null;
+
+    const classNoCell = cgFindCellByLabel(row, "Class No");
+    const classNoRaw = cgCellValue(classNoCell);
+    const classNumber = classNoRaw && /^\d+$/.test(classNoRaw) ? classNoRaw : null;
+
+    map.set(sectionNum, { status, openSeats, waitlistCount, classNumber });
+  }
+
+  // Cache as serialisable [k,v] pairs (Map doesn't survive chrome.storage).
+  setDetailCache(cacheKey, { entries: Array.from(map.entries()) });
+  return map;
+}
+
 // ─── Search-results enrichment (Atlas Browse Courses) ──────────────────────
 //
 // On Atlas search-results pages (detected by the presence of `.browse-cards-wrapper`
@@ -856,6 +1055,32 @@ async function processCard(job) {
 
       instructors = instructors || [];
       sections = sections || [];
+
+      // CG cross-reference: Atlas's section-table-data lacks waitlist counts
+      // and occasionally reports a stale status — CG is the registrar's
+      // authoritative view. Merge per-section: override status, fill in
+      // waitlistCount, and (if Atlas was missing it) backfill openSeats.
+      // Failures fall through silently — Atlas data alone is still rendered.
+      if (sections.length > 0 && termCode) {
+        try {
+          const knownSections = sections.map((s) => s.section).filter(Boolean);
+          const cgMap = await fetchCgSectionData(courseCode, termCode, knownSections);
+          if (cgMap) {
+            for (const sec of sections) {
+              const cg = cgMap.get(sec.section);
+              if (!cg) continue;
+              if (cg.status) sec.status = cg.status;
+              if (typeof cg.waitlistCount === "number") sec.waitlistCount = cg.waitlistCount;
+              if (sec.openSeats == null && typeof cg.openSeats === "number") {
+                sec.openSeats = cg.openSeats;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[atlas-rmp] CG merge failed:", courseCode, termCode, e.message);
+        }
+      }
+
       setDetailCache(cacheKey, { sections });
     }
 
