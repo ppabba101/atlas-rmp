@@ -1140,6 +1140,11 @@ async function processCard(job) {
 
     const finalAuthFailed = authFailed || [...nameToResult.values()].some((r) => r?.reason === "auth-failed");
     renderSectionList(card, sections || [], nameToResult, finalAuthFailed);
+    // Re-run the filter pass so the card-level all-hidden check sees these
+    // freshly-rendered sections. Without this, enriching a card while
+    // hide-closed/hide-wait is already on leaves an empty card frame visible
+    // until the user toggles the setting off and on.
+    applyFiltersToDom();
     // Attribute already holds detailUrl (set in enrichSearchResults) — keep it
     // as-is so future scans on the same card+URL don't re-enrich.
   } catch (e) {
