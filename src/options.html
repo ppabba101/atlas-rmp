@@ -259,42 +259,6 @@
       <img src="../icons/icon48.png" alt="" style="width:46px;height:46px;" />
       <h1 style="margin:0;font-size:2em;font-weight:700;letter-spacing:0.01em;color:#000;">Atlas &times; RMP — Options</h1>
     </header>
-    <!-- ─── Token ────────────────────────────────────────────────────────── -->
-    <div class="card-container">
-      <h3 class="text-med">RMP authorization token</h3>
-      <p class="text-small card-description">
-        Used to call the RateMyProfessors GraphQL API. The built-in default works
-        for now but rotates without warning — paste a fresh one once it 401s.
-      </p>
-
-      <div id="default-banner" class="banner">
-        Currently using the built-in default token. Paste a fresh one below for reliability.
-      </div>
-
-      <div class="row">
-        <label class="block" for="token-input">Authorization header value</label>
-        <input
-          id="token-input"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Basic ..."
-        />
-        <div class="button-row">
-          <button id="save-token" class="primary">Save</button>
-          <button id="test-token">Test token</button>
-          <span id="test-status" class="chip chip-idle"></span>
-          <span id="save-flash" class="save-flash">Saved</span>
-        </div>
-        <p class="help">
-          Get your token from
-          <a href="https://www.ratemyprofessors.com/" target="_blank" rel="noopener">ratemyprofessors.com</a>
-          &rarr; DevTools &rarr; Network &rarr; any <code>/graphql</code> request &rarr; copy the
-          <code>Authorization</code> header value (starts with <code>Basic&nbsp;</code>).
-        </p>
-      </div>
-    </div>
-
     <!-- ─── Display filters ──────────────────────────────────────────────── -->
     <div class="card-container">
       <h3 class="text-med">Display filters</h3>
@@ -396,6 +360,42 @@
       <div class="button-row">
         <button id="save-pages" class="primary">Save active-on</button>
         <span id="pages-flash" class="save-flash">Saved</span>
+      </div>
+    </div>
+
+    <!-- ─── Token ────────────────────────────────────────────────────────── -->
+    <div class="card-container">
+      <h3 class="text-med">RMP authorization token</h3>
+      <p class="text-small card-description">
+        Used to call the RateMyProfessors GraphQL API. The built-in default works
+        for now but rotates without warning — paste a fresh one once it 401s.
+      </p>
+
+      <div id="default-banner" class="banner">
+        Currently using the built-in default token. Paste a fresh one below for reliability.
+      </div>
+
+      <div class="row">
+        <label class="block" for="token-input">Authorization header value</label>
+        <input
+          id="token-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Basic ..."
+        />
+        <div class="button-row">
+          <button id="save-token" class="primary">Save</button>
+          <button id="test-token">Test token</button>
+          <span id="test-status" class="chip chip-idle"></span>
+          <span id="save-flash" class="save-flash">Saved</span>
+        </div>
+        <p class="help">
+          Get your token from
+          <a href="https://www.ratemyprofessors.com/" target="_blank" rel="noopener">ratemyprofessors.com</a>
+          &rarr; DevTools &rarr; Network &rarr; any <code>/graphql</code> request &rarr; copy the
+          <code>Authorization</code> header value (starts with <code>Basic&nbsp;</code>).
+        </p>
       </div>
     </div>
 
