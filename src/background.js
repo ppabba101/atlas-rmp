@@ -128,7 +128,55 @@ async function lookupProfessor(fullName) {
     "results"
   );
 
-  const match = pickBestMatch(fullName, edges);
+  let match = pickBestMatch(fullName, edges);
+
+  // UMich-system fallback: when the Ann Arbor lookup misses, retry without a
+  // schoolID and accept matches at any school whose name STARTS with
+  // "University of Michigan". That covers Ann Arbor / Dearborn / Flint —
+  // the three campuses Atlas surfaces instructors from — and explicitly
+  // excludes Eastern / Western / Central / Michigan State, etc.
+  if (!match) {
+    console.log("[atlas-rmp] No Ann Arbor match — trying UMich-system fallback for:", fullName);
+    let broaderData = null;
+    try {
+      broaderData = await gql(TEACHER_SEARCH_QUERY, {
+        query: { text: last },
+      });
+    } catch (e) {
+      if (e.code === "auth-failed") {
+        return { found: false, reason: "auth-failed" };
+      }
+      console.warn("[atlas-rmp] UMich-system search failed:", e.message);
+    }
+
+    if (broaderData) {
+      const allEdges = broaderData?.data?.newSearch?.teachers?.edges ?? [];
+      const umichEdges = allEdges.filter((e) =>
+        /^university of michigan/i.test(e.node?.school?.name || "")
+      );
+      console.log(
+        "[atlas-rmp] UMich-system search:",
+        allEdges.length,
+        "total,",
+        umichEdges.length,
+        "at UMich campuses"
+      );
+      match = pickBestMatch(fullName, umichEdges);
+      if (match) {
+        console.log(
+          "[atlas-rmp] Cross-campus match for",
+          fullName,
+          "->",
+          match.node.firstName,
+          match.node.lastName,
+          "@",
+          match.node.school?.name,
+          "confidence:",
+          match.confidence
+        );
+      }
+    }
+  }
 
   if (!match) {
     console.log("[atlas-rmp] No match found for:", fullName);
