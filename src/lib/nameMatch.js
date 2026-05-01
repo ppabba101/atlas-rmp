@@ -120,7 +120,27 @@ export function splitName(full) {
 }
 
 /**
- * Internal: check if two first names match, accounting for nicknames.
+ * Strip a leading single-letter+optional-period token when the name has 2+
+ * tokens. Handles the asymmetry where Atlas may show "Halderman, J. Alex"
+ * (which normalize() reduces to "alex" because it's 3+ tokens with an
+ * interior initial) but RMP stores firstName="J. Alex" — only 2 tokens, so
+ * normalize() leaves it as "j. alex" and the direct comparison misses.
+ *
+ * Single-token initials like "j." are left alone — those are legitimately
+ * the entire given name (the "J. Smith" case where normalize already
+ * preserves "j.").
+ */
+function stripLeadingInitial(s) {
+  const tokens = s.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 2 && /^[a-z]\.?$/.test(tokens[0])) {
+    return tokens.slice(1).join(" ");
+  }
+  return s;
+}
+
+/**
+ * Internal: check if two first names match, accounting for nicknames and
+ * leading-initial asymmetry.
  * Both inputs should already be normalized/lowercased.
  *
  * @param {string} a
@@ -131,17 +151,24 @@ function firstNameMatch(a, b) {
   if (!a || !b) return false;
   if (a === b) return true;
 
-  // Resolve to canonical forms via NICKS
-  const canonA = NICKS.get(a) ?? a;
-  const canonB = NICKS.get(b) ?? b;
-  if (canonA === canonB) return true;
+  // Strip leading "X. " from either side before comparing — see the
+  // stripLeadingInitial docstring for the asymmetry this fixes.
+  const aClean = stripLeadingInitial(a);
+  const bClean = stripLeadingInitial(b);
+  if (aClean && bClean && aClean === bClean) return true;
+
+  // Resolve to canonical forms via NICKS (use the cleaned forms so a NICKS
+  // lookup of "alex" succeeds when Atlas had "j. alex").
+  const canonA = NICKS.get(aClean) ?? aClean;
+  const canonB = NICKS.get(bClean) ?? bClean;
+  if (canonA && canonB && canonA === canonB) return true;
 
   // Prefix match — require minimum length 2 on the shorter side. A
   // single-letter prefix would match every name starting with that letter
   // ("a" → "anthony", "andrew", "alex"…); single-initial cases are handled
   // separately in pickBestMatch with a lower 0.80 confidence.
-  const aShort = a.replace(/\.$/, "");
-  const bShort = b.replace(/\.$/, "");
+  const aShort = aClean.replace(/\.$/, "");
+  const bShort = bClean.replace(/\.$/, "");
   if (aShort.length >= 2 && bShort.startsWith(aShort)) return true;
   if (bShort.length >= 2 && aShort.startsWith(bShort)) return true;
 
@@ -175,8 +202,12 @@ function lastNameMatches(atlasLast, rmpLast) {
  * whether RMP stored it as ("Raed", "Al Kontar") or ("Raed Al", "Kontar").
  */
 function tokenSetEquals(atlasFull, rmpFull) {
-  const a = atlasFull.split(/\s+/).filter(Boolean);
-  const b = rmpFull.split(/\s+/).filter(Boolean);
+  // Replace commas with spaces before tokenising — without this, an Atlas
+  // "Smith, John" shape that survives normalize() (normalize doesn't strip
+  // commas because splitName uses them as the Last,First-format signal)
+  // becomes ["smith,", "john"] and never set-equals RMP's ["john", "smith"].
+  const a = atlasFull.replace(/,/g, " ").split(/\s+/).filter(Boolean);
+  const b = rmpFull.replace(/,/g, " ").split(/\s+/).filter(Boolean);
   if (a.length === 0 || a.length !== b.length) return false;
   const aSet = new Set(a);
   for (const t of b) if (!aSet.has(t)) return false;
