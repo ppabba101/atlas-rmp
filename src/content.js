@@ -894,6 +894,7 @@ function statusLabel(status) {
  */
 function renderSectionList(card, sections, nameToResult, authFailed) {
   beginExtensionMutation();
+  try {
   const target = card.querySelector(".card-content") ?? card;
   const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
   if (prior) prior.remove();
@@ -912,7 +913,6 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
     empty.className = "atlas-rmp-instructors-empty";
     empty.textContent = "No instructors posted yet for this term";
     target.appendChild(empty);
-    endExtensionMutation();
     return;
   }
 
@@ -1023,7 +1023,9 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
 
   wrapper.appendChild(list);
   target.appendChild(wrapper);
-  endExtensionMutation();
+  } finally {
+    endExtensionMutation();
+  }
 }
 
 /**
@@ -1032,14 +1034,17 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
  */
 function renderLoadingState(card) {
   beginExtensionMutation();
-  const target = card.querySelector(".card-content") ?? card;
-  const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
-  if (prior) prior.remove();
-  const loading = document.createElement("div");
-  loading.className = "atlas-rmp-loading";
-  loading.textContent = "Loading instructors...";
-  target.appendChild(loading);
-  endExtensionMutation();
+  try {
+    const target = card.querySelector(".card-content") ?? card;
+    const prior = card.querySelector(".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading");
+    if (prior) prior.remove();
+    const loading = document.createElement("div");
+    loading.className = "atlas-rmp-loading";
+    loading.textContent = "Loading instructors...";
+    target.appendChild(loading);
+  } finally {
+    endExtensionMutation();
+  }
 }
 
 /**
@@ -1442,56 +1447,58 @@ function removeAllAnnotations(root) {
   const r = root || document.body;
 
   beginExtensionMutation();
-  // 1. Badges
-  for (const badge of r.querySelectorAll(".rmp-badge")) badge.remove();
+  try {
+    // 1. Badges
+    for (const badge of r.querySelectorAll(".rmp-badge")) badge.remove();
 
-  // 2. Unwrap .atlas-rmp-wrap (preserve the original anchor in place)
-  for (const wrap of r.querySelectorAll(".atlas-rmp-wrap")) {
-    const parent = wrap.parentElement;
-    if (!parent) { wrap.remove(); continue; }
-    while (wrap.firstChild) parent.insertBefore(wrap.firstChild, wrap);
-    wrap.remove();
-  }
-
-  // 3. Annotation markers on source elements
-  for (const el of r.querySelectorAll("[" + BADGE_ATTR + "]")) {
-    el.removeAttribute(BADGE_ATTR);
-  }
-
-  // 4. Browse Courses enrichment chrome (lists, empty states, loading rows)
-  for (const en of r.querySelectorAll(
-    ".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading"
-  )) {
-    en.remove();
-  }
-
-  // 5. Enrichment markers on cards + queued jobs
-  for (const card of r.querySelectorAll("[" + ATLAS_ENRICH_ATTR + "]")) {
-    card.removeAttribute(ATLAS_ENRICH_ATTR);
-  }
-  enrichQueue.length = 0; // drop any pending fetches; in-flight ones bail via guard
-
-  // 6. Helper classes + data attributes used by applyFiltersToDom
-  const dataAttrs = [
-    "data-hide-closed", "data-hide-wait", "data-hide-empty",
-    "data-below-min", "data-min-best", "data-all-hidden",
-  ];
-  for (const attr of dataAttrs) {
-    for (const el of r.querySelectorAll("[" + attr + "]")) {
-      el.removeAttribute(attr);
+    // 2. Unwrap .atlas-rmp-wrap (preserve the original anchor in place)
+    for (const wrap of r.querySelectorAll(".atlas-rmp-wrap")) {
+      const parent = wrap.parentElement;
+      if (!parent) { wrap.remove(); continue; }
+      while (wrap.firstChild) parent.insertBefore(wrap.firstChild, wrap);
+      wrap.remove();
     }
-  }
-  for (const card of r.querySelectorAll(".atlas-rmp-card-empty")) {
-    card.classList.remove("atlas-rmp-card-empty");
-  }
 
-  // 7. Restore inline display we set when hiding all-filtered cards
-  for (const card of r.querySelectorAll("[data-atlas-rmp-display-hide]")) {
-    card.style.display = "";
-    delete card.dataset.atlasRmpDisplayHide;
-  }
+    // 3. Annotation markers on source elements
+    for (const el of r.querySelectorAll("[" + BADGE_ATTR + "]")) {
+      el.removeAttribute(BADGE_ATTR);
+    }
 
-  endExtensionMutation();
+    // 4. Browse Courses enrichment chrome (lists, empty states, loading rows)
+    for (const en of r.querySelectorAll(
+      ".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading"
+    )) {
+      en.remove();
+    }
+
+    // 5. Enrichment markers on cards + queued jobs
+    for (const card of r.querySelectorAll("[" + ATLAS_ENRICH_ATTR + "]")) {
+      card.removeAttribute(ATLAS_ENRICH_ATTR);
+    }
+    enrichQueue.length = 0; // drop any pending fetches; in-flight ones bail via guard
+
+    // 6. Helper classes + data attributes used by applyFiltersToDom
+    const dataAttrs = [
+      "data-hide-closed", "data-hide-wait", "data-hide-empty",
+      "data-below-min", "data-min-best", "data-all-hidden",
+    ];
+    for (const attr of dataAttrs) {
+      for (const el of r.querySelectorAll("[" + attr + "]")) {
+        el.removeAttribute(attr);
+      }
+    }
+    for (const card of r.querySelectorAll(".atlas-rmp-card-empty")) {
+      card.classList.remove("atlas-rmp-card-empty");
+    }
+
+    // 7. Restore inline display we set when hiding all-filtered cards
+    for (const card of r.querySelectorAll("[data-atlas-rmp-display-hide]")) {
+      card.style.display = "";
+      delete card.dataset.atlasRmpDisplayHide;
+    }
+  } finally {
+    endExtensionMutation();
+  }
 }
 
 // ─── Settings live updates ──────────────────────────────────────────────────
