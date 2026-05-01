@@ -222,6 +222,10 @@ function clearCache() {
 // ─── Wire up ────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Footer version pulled from manifest so it updates with releases.
+  const versionEl = $("ext-version");
+  if (versionEl) versionEl.textContent = "v" + chrome.runtime.getManifest().version;
+
   loadToken();
   loadPrefs();
   loadPageToggles();

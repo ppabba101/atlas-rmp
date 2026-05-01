@@ -230,18 +230,27 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = ATLAS_FETCH_TIMEO
 }
 
 // ─── Auth-fail check ────────────────────────────────────────────────────────
+//
+// Cached in module scope and refreshed via storage.onChanged so a Browse
+// Courses page with 50+ instructors doesn't fire 100+ chrome.storage.local
+// reads (annotate calls this both before and after every LOOKUP).
+let authFailedTs = null; // ms timestamp, or null when no flag is set
+const authFailedReady = new Promise((resolve) => {
+  chrome.storage.local.get("rmp:authFailed", (result) => {
+    const entry = result["rmp:authFailed"];
+    authFailedTs = entry?.ts ?? null;
+    resolve();
+  });
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes["rmp:authFailed"]) return;
+  authFailedTs = changes["rmp:authFailed"].newValue?.ts ?? null;
+});
 
 async function isAuthFailed() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("rmp:authFailed", (result) => {
-      const entry = result["rmp:authFailed"];
-      if (!entry || !entry.ts) {
-        resolve(false);
-        return;
-      }
-      resolve(Date.now() - entry.ts < AUTH_FAIL_TTL_MS);
-    });
-  });
+  await authFailedReady;
+  if (authFailedTs == null) return false;
+  return Date.now() - authFailedTs < AUTH_FAIL_TTL_MS;
 }
 
 // ─── Badge rendering ────────────────────────────────────────────────────────
@@ -659,9 +668,14 @@ async function fetchCgSectionData(courseCode, termCode, knownSections) {
   for (const s of ["001", "100", "200", "010", "101"]) {
     if (!candidateSections.includes(s)) candidateSections.push(s);
   }
+  // Cap probe attempts: each fetch has a 10s timeout, and three concurrent
+  // cards each probing N URLs sequentially can stall the whole pipeline if
+  // CG is misbehaving. The first hit usually succeeds anyway.
+  const CG_MAX_PROBES = 3;
+  const probeList = candidateSections.slice(0, CG_MAX_PROBES);
 
   let html = null;
-  for (const sec of candidateSections) {
+  for (const sec of probeList) {
     const url =
       "https://webapps.lsa.umich.edu/cg/cg_detail.aspx?content=" +
       encodeURIComponent(`${termCode}${subject}${catalog}${sec}`) +
