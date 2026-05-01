@@ -87,7 +87,11 @@ const AUTH_FAIL_TTL_MS = 60 * 60 * 1000;
 
 // Search-results enricher tunables
 const ATLAS_DETAIL_TTL_MS = 24 * 60 * 60 * 1000; // 24-hour TTL for parsed detail-page extractions
-const ENRICH_CONCURRENCY = 5;                    // max in-flight detail-page fetches
+// Concurrency = 3 (was 5). Atlas appears to rate-limit when too many detail-
+// page fetches arrive in parallel — users have hit "viewing too many profiles"
+// timeouts when the cache is cold on a fresh Browse Courses load. The 24h
+// detail-page cache means repeat visits hit zero network anyway.
+const ENRICH_CONCURRENCY = 3;
 const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
 
 // ─── User settings (Feature B) ──────────────────────────────────────────────
