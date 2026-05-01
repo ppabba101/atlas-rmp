@@ -22,6 +22,7 @@ const PAGE_KEYS = {
   searchResults:     "setting:enableOnSearchResults",
   scheduleBuilder:   "setting:enableOnScheduleBuilder",
   courseGuide:       "setting:enableOnCourseGuide",
+  browseInstructors: "setting:enableOnBrowseInstructors",
 };
 
 // chrome.storage entries that count as RMP cache: per-prof lookups (`prof:...`)

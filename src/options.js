@@ -20,6 +20,7 @@ const PAGE_KEYS = {
   searchResults:     "setting:enableOnSearchResults",
   scheduleBuilder:   "setting:enableOnScheduleBuilder",
   courseGuide:       "setting:enableOnCourseGuide",
+  browseInstructors: "setting:enableOnBrowseInstructors",
 };
 
 const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:"];

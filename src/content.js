@@ -42,6 +42,14 @@ const SELECTORS = {
     'a[href*="/instructor/"]',
   ],
 
+  // browse-instructors: Atlas Browse Instructors page (atlas.ai.umich.edu/instructors/)
+  // Each card is a <bookmarkable-card> whose primary link points at /instructor/...
+  // Same href pattern that works for course-detail / dashboard links — the
+  // <a> contains the instructor's name as its visible text.
+  "browse-instructors": [
+    'a[href*="/instructor/"]',
+  ],
+
   // course-guide: LSA Course Guide search results (webapps.lsa.umich.edu/cg/*)
   // CONFIRMED via Step 0 discovery on Fall 2026 EECS results page (2026-04-30):
   // every instructor is an <a href="mailto:..."> inside div.col-sm-3 whose
@@ -113,6 +121,7 @@ const PAGE_ENABLE_KEYS = {
   "search-results":      "setting:enableOnSearchResults",
   "schedule-builder":    "setting:enableOnScheduleBuilder",
   "course-guide":        "setting:enableOnCourseGuide",
+  "browse-instructors":  "setting:enableOnBrowseInstructors",
 };
 
 let SETTINGS = {
@@ -127,6 +136,7 @@ let SETTINGS = {
     "search-results":      true,
     "schedule-builder":    true,
     "course-guide":        true,
+    "browse-instructors":  true,
   },
 };
 
@@ -1249,6 +1259,11 @@ function detectPageType() {
 
   if (host === "atlas.ai.umich.edu") {
     if (path.startsWith("/schedule-builder")) return "schedule-builder";
+    // /instructors/ → Browse Instructors. Must come BEFORE the /instructor/
+    // (singular) check since startsWith("/instructor/") would also match
+    // anything beginning with /instructor — e.g. /instructors/ does NOT in
+    // fact start with /instructor/, but ordering this first makes intent clear.
+    if (path === "/instructors" || path === "/instructors/") return "browse-instructors";
     if (path.startsWith("/instructor/")) return "instructor-profile";
     // /courses/EECS281/2610/ → course-detail (course code + digits after /courses/)
     if (/^\/courses\/[A-Z]+\d/.test(path)) return "course-detail";
