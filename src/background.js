@@ -128,55 +128,7 @@ async function lookupProfessor(fullName) {
     "results"
   );
 
-  let match = pickBestMatch(fullName, edges);
-
-  // Cross-campus fallback: Atlas surfaces instructors from UMich Ann Arbor,
-  // Dearborn, AND Flint. RMP often files those professors under their primary
-  // campus (Dearborn / Flint), or even at affiliated MI schools (EMU, etc.).
-  // When the Ann Arbor lookup misses, retry without a schoolID filter and
-  // accept matches at any school whose name contains "Michigan".
-  if (!match) {
-    console.log("[atlas-rmp] No Ann Arbor match — trying Michigan-wide search:", fullName);
-    let broaderData = null;
-    try {
-      broaderData = await gql(TEACHER_SEARCH_QUERY, {
-        query: { text: last },
-      });
-    } catch (e) {
-      if (e.code === "auth-failed") {
-        return { found: false, reason: "auth-failed" };
-      }
-      console.warn("[atlas-rmp] Michigan-wide search failed:", e.message);
-    }
-
-    if (broaderData) {
-      const allEdges = broaderData?.data?.newSearch?.teachers?.edges ?? [];
-      const miEdges = allEdges.filter((e) =>
-        /michigan/i.test(e.node?.school?.name || "")
-      );
-      console.log(
-        "[atlas-rmp] Michigan-wide search:",
-        allEdges.length,
-        "total,",
-        miEdges.length,
-        "at Michigan-named schools"
-      );
-      match = pickBestMatch(fullName, miEdges);
-      if (match) {
-        console.log(
-          "[atlas-rmp] Cross-campus match for",
-          fullName,
-          "->",
-          match.node.firstName,
-          match.node.lastName,
-          "@",
-          match.node.school?.name,
-          "confidence:",
-          match.confidence
-        );
-      }
-    }
-  }
+  const match = pickBestMatch(fullName, edges);
 
   if (!match) {
     console.log("[atlas-rmp] No match found for:", fullName);
@@ -191,8 +143,6 @@ async function lookupProfessor(fullName) {
     "->",
     match.node.firstName,
     match.node.lastName,
-    "@",
-    match.node.school?.name,
     "confidence:",
     match.confidence
   );
@@ -208,7 +158,6 @@ async function lookupProfessor(fullName) {
     numRatings: match.node.numRatings,
     wouldTakeAgainPercent: match.node.wouldTakeAgainPercent,
     legacyId: match.node.legacyId,
-    schoolName: match.node.school?.name ?? null,
     rmpUrl:
       "https://www.ratemyprofessors.com/professor/" + match.node.legacyId,
   };
