@@ -1,122 +1,91 @@
 // Name matching utilities for Atlas x RMP extension
 
 /**
- * Nickname-to-formal first name map.
- * Covers common cases from the smoke-test professor list and general UMich faculty.
+ * Nickname → canonical-form map for first-name matching. Asymmetric on
+ * purpose: only nickname-to-canonical entries are listed; canonical-to-itself
+ * entries would be no-ops since `NICKS.get(x) ?? x` returns `x` when the key
+ * is missing. Add a new entry whenever you see a canonical/nickname pair miss
+ * in the wild.
+ *
+ * Stephen / Steven are kept separate — they're independent names in practice,
+ * not nicknames of each other.
  */
 export const NICKS = new Map([
   ["wes", "westley"],
-  ["westley", "westley"],
   ["alex", "alexander"],
-  ["alexander", "alexander"],
-  ["al", "albert"],
-  ["albert", "albert"],
   ["bob", "robert"],
-  ["robert", "robert"],
   ["rob", "robert"],
   ["bill", "william"],
-  ["william", "william"],
   ["will", "william"],
   ["jim", "james"],
-  ["james", "james"],
   ["jake", "jacob"],
-  ["jacob", "jacob"],
   ["mike", "michael"],
-  ["michael", "michael"],
   ["mick", "michael"],
   ["dave", "david"],
-  ["david", "david"],
   ["dan", "daniel"],
-  ["daniel", "daniel"],
   ["danny", "daniel"],
   ["tom", "thomas"],
-  ["thomas", "thomas"],
   ["tommy", "thomas"],
   ["chris", "christopher"],
-  ["christopher", "christopher"],
   ["matt", "matthew"],
-  ["matthew", "matthew"],
   ["steve", "stephen"],
-  ["stephen", "stephen"],
-  ["steven", "steven"],
   ["andy", "andrew"],
-  ["andrew", "andrew"],
   ["drew", "andrew"],
   ["joe", "joseph"],
-  ["joseph", "joseph"],
   ["joey", "joseph"],
   ["tony", "anthony"],
-  ["anthony", "anthony"],
   ["ben", "benjamin"],
-  ["benjamin", "benjamin"],
   ["ed", "edward"],
-  ["edward", "edward"],
   ["ted", "edward"],
   ["sam", "samuel"],
-  ["samuel", "samuel"],
   ["pat", "patrick"],
-  ["patrick", "patrick"],
   ["rick", "richard"],
-  ["richard", "richard"],
   ["dick", "richard"],
   ["nick", "nicholas"],
-  ["nicholas", "nicholas"],
   ["pete", "peter"],
-  ["peter", "peter"],
   ["greg", "gregory"],
-  ["gregory", "gregory"],
   ["fred", "frederick"],
-  ["frederick", "frederick"],
   ["jeff", "jeffrey"],
-  ["jeffrey", "jeffrey"],
   ["geoff", "geoffrey"],
-  ["geoffrey", "geoffrey"],
   ["ken", "kenneth"],
-  ["kenneth", "kenneth"],
-  ["mark", "mark"],
   ["marc", "mark"],
   ["liz", "elizabeth"],
-  ["elizabeth", "elizabeth"],
   ["beth", "elizabeth"],
   ["kate", "katherine"],
-  ["katherine", "katherine"],
   ["kathy", "katherine"],
   ["katie", "katherine"],
   ["sue", "susan"],
-  ["susan", "susan"],
-  ["amy", "amy"],
-  ["ann", "ann"],
-  ["anne", "anne"],
   ["annie", "anne"],
-  ["mary", "mary"],
-  ["sarah", "sarah"],
   ["sara", "sarah"],
-  ["ji", "ji"],
-  ["ya'acov", "ya'acov"],
   ["yaccov", "ya'acov"],
   ["yaacov", "ya'acov"],
-  ["smadar", "smadar"],
-  ["yuekai", "yuekai"],
-  ["marwa", "marwa"],
 ]);
 
 /**
  * Normalize a name string: lowercase, strip titles, strip middle initials, trim.
+ *
+ * Middle initials are only stripped when there are 3+ tokens, because in
+ * 2-token names like "J. Smith" the leading initial-shaped token IS the
+ * given name, not a middle initial — stripping it leaves "smith" alone and
+ * causes false matches against any "Smith" in RMP results.
  *
  * @param {string} s
  * @returns {string}
  */
 export function normalize(s) {
   if (!s || typeof s !== "string") return "";
-  return s
+  const cleaned = s
     .toLowerCase()
-    // Strip titles
     .replace(/\b(dr|prof|professor|mr|ms|mrs|miss|mx)\b\.?/g, "")
-    // Strip middle initials (single letter followed by period or surrounded by spaces)
-    .replace(/\b[a-z]\.\s*/g, "")
-    // Collapse whitespace
     .replace(/\s+/g, " ")
     .trim();
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length < 3) return tokens.join(" ");
+  // Strip interior single-letter tokens (with or without trailing period);
+  // never touch the first or last token.
+  return tokens
+    .filter((t, i) => i === 0 || i === tokens.length - 1 || !/^[a-z]\.?$/.test(t))
+    .join(" ");
 }
 
 /**
@@ -167,11 +136,14 @@ function firstNameMatch(a, b) {
   const canonB = NICKS.get(b) ?? b;
   if (canonA === canonB) return true;
 
-  // One is prefix/initial of the other (e.g. "j." vs "james")
+  // Prefix match — require minimum length 2 on the shorter side. A
+  // single-letter prefix would match every name starting with that letter
+  // ("a" → "anthony", "andrew", "alex"…); single-initial cases are handled
+  // separately in pickBestMatch with a lower 0.80 confidence.
   const aShort = a.replace(/\.$/, "");
   const bShort = b.replace(/\.$/, "");
-  if (bShort.startsWith(aShort) && aShort.length >= 1) return true;
-  if (aShort.startsWith(bShort) && bShort.length >= 1) return true;
+  if (aShort.length >= 2 && bShort.startsWith(aShort)) return true;
+  if (bShort.length >= 2 && aShort.startsWith(bShort)) return true;
 
   return false;
 }
