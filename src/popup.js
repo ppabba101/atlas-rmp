@@ -5,6 +5,7 @@
 const RMP_AUTH_KEY     = "rmp:authToken";
 const RMP_DEFAULT_AUTH = "Basic dGVzdDp0ZXN0";
 const AUTH_FAILED_KEY  = "rmp:authFailed";
+const CG_AUTH_KEY      = "cg:authNeeded";
 
 const PREF_KEYS = {
   hideClosedSections:     "setting:hideClosedSections",
@@ -69,6 +70,16 @@ function loadPageToggles() {
 
 function persistPageToggle(name, checked) {
   chrome.storage.local.set({ [PAGE_KEYS[name]]: checked });
+}
+
+// ─── CG auth banner ─────────────────────────────────────────────────────────
+
+function loadCgAuthCard() {
+  chrome.storage.local.get(CG_AUTH_KEY, (result) => {
+    const needed = result?.[CG_AUTH_KEY];
+    const card = $("cg-auth-card");
+    if (card) card.style.display = (needed && needed.ts) ? "block" : "none";
+  });
 }
 
 // ─── Token status ───────────────────────────────────────────────────────────
@@ -138,6 +149,16 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPageToggles();
   loadTokenStatus();
   loadCacheCount();
+  loadCgAuthCard();
+
+  $("cg-reauth-btn").addEventListener("click", () => {
+    const cgUrl = "https://webapps.lsa.umich.edu/cg/";
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url: cgUrl });
+    } else {
+      window.open(cgUrl);
+    }
+  });
 
   $("pref-hideClosed").addEventListener("change", (e) =>
     persistBoolPref(PREF_KEYS.hideClosedSections, e.target.checked)
@@ -169,6 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[RMP_AUTH_KEY] || changes[AUTH_FAILED_KEY]) loadTokenStatus();
+    if (changes[CG_AUTH_KEY]) loadCgAuthCard();
     if (Object.values(PREF_KEYS).some((k) => changes[k])) loadPrefs();
     if (Object.values(PAGE_KEYS).some((k) => changes[k])) loadPageToggles();
   });

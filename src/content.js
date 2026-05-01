@@ -182,6 +182,27 @@ function applyFiltersToDom() {
     const below = min > 0 && (Number.isNaN(best) || best < min);
     sec.setAttribute("data-below-min", below ? "true" : "false");
   }
+
+  // Per-card all-hidden check: if every section in the card's section list is
+  // hidden by current filters, hide the entire card so no empty shell is shown.
+  for (const card of document.querySelectorAll(".bookmarkable-card")) {
+    const sections = card.querySelectorAll(".atlas-rmp-section");
+    const total = sections.length;
+    if (total === 0) {
+      card.removeAttribute("data-all-hidden");
+      continue;
+    }
+    let hiddenCount = 0;
+    for (const sec of sections) {
+      const isClosed = sec.classList.contains("atlas-rmp-status-closed") &&
+                       sec.getAttribute("data-hide-closed") === "true";
+      const isWait   = sec.classList.contains("atlas-rmp-status-wait") &&
+                       sec.getAttribute("data-hide-wait") === "true";
+      const isBelowMin = sec.getAttribute("data-below-min") === "true";
+      if (isClosed || isWait || isBelowMin) hiddenCount++;
+    }
+    card.setAttribute("data-all-hidden", hiddenCount === total ? "true" : "false");
+  }
 }
 
 /**

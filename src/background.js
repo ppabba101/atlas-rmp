@@ -206,9 +206,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   fetch(url, { credentials: "include", signal: controller.signal })
     .then(async (res) => {
       const body = await res.text();
+      // Detect Shibboleth redirect: the service worker follows the 302
+      // transparently, so we check the final URL rather than the status code.
+      if (res.url && res.url.includes("shibboleth.umich.edu")) {
+        chrome.storage.local.set({ "cg:authNeeded": { ts: Date.now() } });
+        sendResponse({ ok: false, status: res.status, finalUrl: res.url, body, error: "cg-auth-redirect" });
+        return;
+      }
+      // Successful fetch: if the body contains the section table marker, CG
+      // auth is working — clear any stale auth-needed flag.
+      if (body.indexOf("clsschedulerow") !== -1) {
+        chrome.storage.local.remove("cg:authNeeded");
+      }
       sendResponse({ ok: res.ok, status: res.status, finalUrl: res.url, body });
     })
     .catch((e) => {
+      // Network/CORS errors when the redirect was blocked before completing
+      // are also treated as a potential auth failure. We set the flag
+      // conservatively; it will be cleared on the next successful CG fetch.
+      chrome.storage.local.set({ "cg:authNeeded": { ts: Date.now() } });
       sendResponse({ ok: false, error: e.message || String(e) });
     })
     .finally(() => clearTimeout(timer));
@@ -223,17 +239,22 @@ chrome.runtime.onInstalled.addListener(() => {
     console.error("[atlas-rmp] School ID pre-warm failed:", e.message);
   });
   syncAuthFailedBadge();
+  syncCgAuthBadge();
 });
 
 // ─── Toolbar action: surface auth-fail state on the icon ───────────────────
 //
-// Whenever rmp:authFailed flips on/off, update the toolbar badge + tooltip so
-// the user sees the problem before opening Atlas. The popup also exposes a
-// "open options" link, but the badge is the most discoverable signal.
+// Whenever rmp:authFailed or cg:authNeeded flips on/off, update the toolbar
+// badge + tooltip so the user sees the problem before opening Atlas. The popup
+// also exposes dedicated cards, but the badge is the most discoverable signal.
+//
+// Priority: RMP auth failure (red "!") takes precedence; CG auth needed shows
+// an orange "!" when RMP is healthy. When both are clear the badge is removed.
 
 const AUTH_FAIL_BADGE_TEXT = "!";
-const AUTH_FAIL_TITLE = "Atlas x RMP — auth expired. Click to update token in extension Options.";
-const DEFAULT_TITLE   = "Atlas x RMP";
+const AUTH_FAIL_TITLE     = "Atlas x RMP — auth expired. Click to update token in extension Options.";
+const CG_AUTH_TITLE       = "LSA Course Guide auth expired — click to re-authenticate";
+const DEFAULT_TITLE       = "Atlas x RMP";
 
 function setAuthFailedBadge(isFailed) {
   try {
@@ -258,13 +279,44 @@ function syncAuthFailedBadge() {
   });
 }
 
+/**
+ * Paint an orange "!" badge when CG auth is needed (and RMP auth is healthy).
+ * If RMP auth is also failed, RMP takes visual priority (red badge stays).
+ */
+function syncCgAuthBadge() {
+  chrome.storage.local.get(["rmp:authFailed", "cg:authNeeded"], (result) => {
+    const rmpFailed = !!(result?.["rmp:authFailed"]?.ts);
+    const cgNeeded  = !!(result?.["cg:authNeeded"]?.ts);
+    if (rmpFailed) return; // RMP badge already shown; don't downgrade to orange
+    try {
+      if (cgNeeded) {
+        if (chrome.action?.setBadgeText)            chrome.action.setBadgeText({ text: AUTH_FAIL_BADGE_TEXT });
+        if (chrome.action?.setBadgeBackgroundColor) chrome.action.setBadgeBackgroundColor({ color: "#ea580c" });
+        if (chrome.action?.setTitle)                chrome.action.setTitle({ title: CG_AUTH_TITLE });
+      } else {
+        if (chrome.action?.setBadgeText)  chrome.action.setBadgeText({ text: "" });
+        if (chrome.action?.setTitle)      chrome.action.setTitle({ title: DEFAULT_TITLE });
+      }
+    } catch (e) {
+      // chrome.action may be unavailable in some test contexts — ignore.
+    }
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes["rmp:authFailed"]) {
     const newVal = changes["rmp:authFailed"].newValue;
-    setAuthFailedBadge(!!(newVal && newVal.ts));
+    const isFailed = !!(newVal && newVal.ts);
+    setAuthFailedBadge(isFailed);
+    // When RMP auth clears, let CG badge take over if still needed.
+    if (!isFailed) syncCgAuthBadge();
+  }
+  if (changes["cg:authNeeded"]) {
+    syncCgAuthBadge();
   }
 });
 
 // Cold start (service worker wake-up) also needs to repaint the badge.
 syncAuthFailedBadge();
+syncCgAuthBadge();

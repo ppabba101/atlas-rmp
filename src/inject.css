@@ -224,3 +224,8 @@
 .atlas-rmp-section[data-below-min="true"] {
   display: none;
 }
+
+/* Hide entire cards when every section is filtered out by current settings. */
+.bookmarkable-card[data-all-hidden="true"] {
+  display: none;
+}
