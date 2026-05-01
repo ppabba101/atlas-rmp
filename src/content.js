@@ -337,17 +337,10 @@ function badgeHTML(result, authFailed) {
 // ─── Annotation ─────────────────────────────────────────────────────────────
 
 /**
- * Choose where to insert the badge. When the matched element wraps additional
- * structure (Browse Instructors: the card-wrapping <a> contains a heading and
- * possibly a department blurb), `el.insertAdjacentHTML("afterend", ...)` puts
- * the badge after the full-width link where flex / block layout pushes it to
- * the far right of the card. Anchoring on the deepest descendant whose text
- * equals the name keeps the badge flush against the visible name. No-op when
- * el is already a leaf (course-detail / Schedule Builder / dashboard links).
- *
- * @param {Element} el
- * @param {string} name
- * @returns {Element}
+ * Find the deepest descendant of `el` whose textContent equals the name.
+ * Returns `el` itself when there's no matching descendant (e.g., the link
+ * directly wraps the name text). Used by insertBadge() to pick the tightest
+ * anchor before falling back to wrapping.
  */
 function findBadgeAnchor(el, name) {
   if (!name || el.children.length === 0) return el;
@@ -361,6 +354,53 @@ function findBadgeAnchor(el, name) {
     node = walker.nextNode();
   }
   return best || el;
+}
+
+/**
+ * Insert the badge HTML next to the name, robust against the Browse
+ * Instructors card layout where the matched <a> sits inside a flex parent
+ * that justifies a bookmark icon to the right edge — vanilla
+ * `insertAdjacentHTML("afterend", ...)` would land the badge against that
+ * right edge instead of beside the name.
+ *
+ * Strategy:
+ *   1. If a descendant whose textContent equals the name exists, anchor on
+ *      it and insert as sibling (badge sits next to the inner name element).
+ *   2. Else (the matched <a> is a leaf), wrap the link + badge in an
+ *      inline-flex span. The wrapper takes the link's old slot in the
+ *      parent's layout, and the badge sits flush to the link inside it.
+ *   3. If wrapping isn't possible (no parent), fall back to plain afterend.
+ *
+ * Idempotent: re-runs of scan() see the wrapper class and skip.
+ *
+ * @param {Element} el
+ * @param {string} name
+ * @param {string} html - badgeHTML output
+ */
+function insertBadge(el, name, html) {
+  // Already wrapped from a prior pass — just keep the badge next to the link.
+  if (el.parentElement?.classList.contains("atlas-rmp-wrap")) {
+    el.insertAdjacentHTML("afterend", html);
+    return;
+  }
+
+  const inner = findBadgeAnchor(el, name);
+  if (inner !== el) {
+    inner.insertAdjacentHTML("afterend", html);
+    return;
+  }
+
+  const parent = el.parentElement;
+  if (parent) {
+    const wrap = document.createElement("span");
+    wrap.className = "atlas-rmp-wrap";
+    parent.insertBefore(wrap, el);
+    wrap.appendChild(el);
+    wrap.insertAdjacentHTML("beforeend", html);
+    return;
+  }
+
+  el.insertAdjacentHTML("afterend", html);
 }
 
 /**
@@ -428,7 +468,7 @@ async function annotate(el) {
 
   if (authFailed) {
     el.setAttribute(BADGE_ATTR, name);
-    findBadgeAnchor(el, name).insertAdjacentHTML("afterend", badgeHTML(null, true));
+    insertBadge(el, name, badgeHTML(null, true));
     return;
   }
 
@@ -460,7 +500,7 @@ async function annotate(el) {
   el.setAttribute(BADGE_ATTR, name);
 
   const newAuthFailed = result?.reason === "auth-failed" || (await isAuthFailed());
-  findBadgeAnchor(el, name).insertAdjacentHTML("afterend", badgeHTML(result, newAuthFailed));
+  insertBadge(el, name, badgeHTML(result, newAuthFailed));
 }
 
 // ─── Course harvesting (Workstream B Path b) ────────────────────────────────

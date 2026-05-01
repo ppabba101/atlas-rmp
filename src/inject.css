@@ -1,5 +1,23 @@
 /* Atlas x RMP — badge styles */
 
+/* Wrapper inserted by content.js insertBadge() to keep the badge flush
+ * against the name on Browse Instructors cards. Without it the card's
+ * flex parent pushes a sibling badge to the right edge (next to the
+ * bookmark icon). inline-flex so the wrapper behaves like the original
+ * inline link in the parent's flow. */
+.atlas-rmp-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.atlas-rmp-wrap > .rmp-badge {
+  /* Wrapper provides its own gap; suppress the badge's own margin so it
+   * doesn't double-space. */
+  margin-left: 0;
+}
+
 .rmp-badge {
   display: inline-block;
   font-size: 0.72em;
