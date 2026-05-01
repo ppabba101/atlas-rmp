@@ -4,16 +4,23 @@
   <meta charset="UTF-8">
   <title>Atlas x RMP</title>
   <style>
-    /* Palette mirrors src/inject.css badge colors so popup feels like the same product. */
+    /* Atlas-style popup. Mimics atlas.ai.umich.edu's card / typography hierarchy
+       (no Typekit dep — system-ui only). Atlas eval-card palette is reused for
+       status chips so popup feels native to Atlas. */
     :root {
-      --good-bg: #bbf7d0;  --good-fg: #14532d;
-      --ok-bg:   #fef9c3;  --ok-fg:   #713f12;
-      --bad-bg:  #fee2e2;  --bad-fg:  #7f1d1d;
-      --muted:   #6b7280;
-      --border:  #e5e7eb;
-      --bg:      #ffffff;
-      --fg:      #1f2937;
-      --accent:  #2563eb;
+      --umich-blue:   #00274C;
+      --umich-maize:  #FFCB05;
+      --pink:         #d32582;
+      --green:        #60800c;
+      --blue:         #245389;
+      --purple:       #8f29ad;
+      --orange:       #ba5b00;
+      --bg-page:      #f4f5f7;
+      --bg-card:      #ffffff;
+      --fg:           #1f2937;
+      --fg-muted:     #6b7280;
+      --border:       #e5e7eb;
+      --shadow:       0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
     }
 
     * { box-sizing: border-box; }
@@ -21,139 +28,200 @@
     html, body {
       margin: 0;
       padding: 0;
-      width: 300px;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      background: var(--bg);
+      width: 320px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg-page);
       color: var(--fg);
       font-size: 13px;
       line-height: 1.4;
     }
 
-    header {
+    /* Atlas-style nav-bar */
+    .nav-bar {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--umich-blue);
+      color: white;
     }
-
-    header img { width: 18px; height: 18px; }
-    header h1 {
-      font-size: 0.95em;
-      margin: 0;
+    .nav-bar img { width: 24px; height: 24px; border-radius: 4px; }
+    .nav-bar .wordmark {
       font-weight: 600;
+      letter-spacing: 0.01em;
+      font-size: 0.95em;
     }
 
-    .section {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
+    .wrapper {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
 
-    .section:last-child { border-bottom: none; }
+    /* Atlas card-container — white surface, light shadow, rounded corners */
+    .card-container {
+      background: var(--bg-card);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 12px 14px;
+    }
+
+    .text-med {
+      font-size: 1em;
+      font-weight: 600;
+      color: var(--fg);
+      margin: 0 0 4px;
+    }
+    .text-small {
+      font-size: 0.85em;
+      color: var(--fg-muted);
+    }
+    .card-description {
+      margin: 0 0 10px;
+    }
 
     .pref-row {
       display: flex;
       align-items: center;
-      padding: 3px 0;
+      padding: 4px 0;
       cursor: pointer;
     }
-
-    .pref-row label {
-      flex: 1;
-      cursor: pointer;
-    }
-
-    input[type="checkbox"] {
-      margin-right: 8px;
-    }
-
-    input[type="number"] {
-      width: 56px;
-      padding: 2px 4px;
-      font-size: 0.95em;
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      margin-left: 6px;
-    }
+    .pref-row label { flex: 1; cursor: pointer; }
+    .pref-row input[type="checkbox"] { margin-right: 8px; }
 
     .min-row {
       display: flex;
       align-items: center;
-      padding: 3px 0;
+      padding: 4px 0;
+      gap: 6px;
+    }
+    .min-row label { flex: 1; }
+
+    input[type="number"] {
+      width: 56px;
+      padding: 3px 5px;
+      font-size: 0.95em;
+      border: 1px solid var(--border);
+      border-radius: 4px;
     }
 
-    .status-row {
+    /* Atlas eval-card-style chips */
+    .chip {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.78em;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .chip-default { background: #fff4d6; color: var(--orange); }
+    .chip-ok      { background: #e2efbf; color: var(--green); }
+    .chip-warn    { background: #fde2ee; color: var(--pink);
+                    cursor: pointer; text-decoration: none; }
+    .chip-warn:hover { filter: brightness(0.95); }
+
+    .row {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      font-size: 0.85em;
-    }
-
-    .status-row .label { color: var(--muted); }
-    .status-row .value-ok   { color: var(--good-fg); }
-    .status-row .value-warn { color: var(--bad-fg); cursor: pointer; text-decoration: underline; }
-    .status-row .value-default { color: var(--ok-fg); }
-
-    .link-row {
-      display: flex;
       align-items: center;
-      justify-content: space-between;
-      font-size: 0.85em;
+      gap: 6px;
     }
+    .row + .row { margin-top: 6px; }
 
     a.action {
-      color: var(--accent);
+      color: var(--blue);
       text-decoration: none;
       cursor: pointer;
       font-size: 0.85em;
     }
-
     a.action:hover { text-decoration: underline; }
 
     .footer {
-      padding: 8px 12px;
       text-align: right;
+      padding: 4px 4px 8px;
     }
   </style>
 </head>
 <body>
-  <header>
+  <div class="nav-bar">
     <img src="../icons/icon48.png" alt="" />
-    <h1>Atlas x RMP</h1>
-  </header>
-
-  <div class="section">
-    <div class="pref-row">
-      <input type="checkbox" id="pref-hideClosed" />
-      <label for="pref-hideClosed">Hide closed sections</label>
-    </div>
-    <div class="pref-row">
-      <input type="checkbox" id="pref-hideEmpty" />
-      <label for="pref-hideEmpty">Hide empty cards</label>
-    </div>
-    <div class="min-row">
-      <input type="checkbox" id="pref-minRating" />
-      <label for="pref-minRating">Min RMP rating:</label>
-      <input type="number" id="pref-minRatingValue" min="0" max="5" step="0.1" value="0" />
-    </div>
+    <span class="wordmark">Atlas &times; RMP</span>
   </div>
 
-  <div class="section">
-    <div class="status-row">
-      <span class="label">Token:</span>
-      <span id="token-status" class="value-default">checking...</span>
+  <div class="wrapper">
+    <div class="card-container">
+      <h3 class="text-med">Token status</h3>
+      <p class="text-small card-description">RMP authorization header used for lookups.</p>
+      <div class="row">
+        <span class="text-small">Status</span>
+        <span id="token-status" class="chip chip-default">checking...</span>
+      </div>
     </div>
-    <div class="status-row" style="margin-top: 4px;">
-      <span class="label">RMP cache:</span>
-      <span>
-        <span id="cache-count">0</span> entries &middot;
-        <a id="clear-cache" class="action">clear</a>
-      </span>
-    </div>
-  </div>
 
-  <div class="footer">
-    <a id="open-options" class="action">Open full Options &rarr;</a>
+    <div class="card-container">
+      <h3 class="text-med">Display filters</h3>
+      <p class="text-small card-description">Hide noisy rows, focus on what matters.</p>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideClosed" />
+        <label for="pref-hideClosed">Hide closed sections</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideWait" />
+        <label for="pref-hideWait">Hide wait-list sections</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideEmpty" />
+        <label for="pref-hideEmpty">Hide cards with no instructors</label>
+      </div>
+      <div class="min-row">
+        <input type="checkbox" id="pref-minRating" />
+        <label for="pref-minRating">Min RMP rating:</label>
+        <input type="number" id="pref-minRatingValue" min="0" max="5" step="0.1" value="0" />
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Active on</h3>
+      <p class="text-small card-description">Choose which pages get RMP badges.</p>
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseDetail" />
+        <label for="page-courseDetail">Course detail</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-instructorProfile" />
+        <label for="page-instructorProfile">Instructor profile</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-dashboard" />
+        <label for="page-dashboard">Dashboard</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-searchResults" />
+        <label for="page-searchResults">Browse Courses</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-scheduleBuilder" />
+        <label for="page-scheduleBuilder">Schedule Builder</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseGuide" />
+        <label for="page-courseGuide">LSA Course Guide</label>
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Cache</h3>
+      <p class="text-small card-description">Local RMP lookups cached for speed.</p>
+      <div class="row">
+        <span class="text-small"><span id="cache-count">0</span> entries</span>
+        <a id="clear-cache" class="action">Clear cache</a>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a id="open-options" class="action">Open full Options &rarr;</a>
+    </div>
   </div>
 
   <script src="popup.js"></script>

@@ -4,224 +4,403 @@
   <meta charset="UTF-8">
   <title>Atlas x RMP — Options</title>
   <style>
-    /* Palette mirrors src/inject.css badge colors so Options feels like the same product. */
+    /* Atlas-style options page. Mimics atlas.ai.umich.edu's body + wrapper +
+       card-container layout (no Typekit dep — system-ui only). Atlas eval-card
+       palette is reused for status chips. */
     :root {
-      --good-bg: #bbf7d0;  --good-fg: #14532d;
-      --ok-bg:   #fef9c3;  --ok-fg:   #713f12;
-      --bad-bg:  #fee2e2;  --bad-fg:  #7f1d1d;
-      --muted:   #6b7280;
-      --border:  #e5e7eb;
-      --bg:      #ffffff;
-      --fg:      #1f2937;
-      --accent:  #2563eb;
+      --umich-blue:   #00274C;
+      --umich-maize:  #FFCB05;
+      --pink:         #d32582;
+      --green:        #60800c;
+      --blue:         #245389;
+      --purple:       #8f29ad;
+      --orange:       #ba5b00;
+      --bg-page:      #f4f5f7;
+      --bg-card:      #ffffff;
+      --bg-input:     #fafafa;
+      --fg:           #1f2937;
+      --fg-muted:     #6b7280;
+      --border:       #e5e7eb;
+      --shadow:       0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
     }
 
     * { box-sizing: border-box; }
 
     body {
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      max-width: 640px;
-      margin: 0 auto;
-      padding: 32px 24px 48px;
-      background: var(--bg);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: var(--bg-page);
       color: var(--fg);
       line-height: 1.5;
     }
 
-    h1 {
-      font-size: 1.4em;
-      margin: 0 0 24px;
+    .nav-bar {
+      background: var(--umich-blue);
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .nav-bar img { width: 32px; height: 32px; border-radius: 6px; }
+    .nav-bar h1 {
+      margin: 0;
+      font-size: 1.05em;
       font-weight: 600;
+      letter-spacing: 0.01em;
     }
 
-    h2 {
+    .wrapper {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 20px 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card-container {
+      background: var(--bg-card);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 20px 22px;
+    }
+
+    .text-med {
       font-size: 1em;
-      margin: 28px 0 12px;
       font-weight: 600;
       color: var(--fg);
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 6px;
+      margin: 0 0 4px;
     }
+    .text-small {
+      font-size: 0.85em;
+      color: var(--fg-muted);
+      margin: 0;
+    }
+    .card-description { margin-bottom: 14px; }
 
-    .row {
-      margin-bottom: 12px;
-    }
+    .row { margin-bottom: 12px; }
+    .row:last-child { margin-bottom: 0; }
 
     label.block {
       display: block;
       margin-bottom: 4px;
       font-size: 0.85em;
-      color: var(--muted);
+      color: var(--fg-muted);
     }
 
     input[type="text"] {
       width: 100%;
-      padding: 8px 10px;
+      padding: 9px 11px;
       font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       font-size: 0.85em;
       border: 1px solid var(--border);
-      border-radius: 4px;
-      background: #fafafa;
+      border-radius: 6px;
+      background: var(--bg-input);
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--blue);
+      background: white;
     }
 
     input[type="number"] {
       width: 70px;
-      padding: 4px 6px;
+      padding: 5px 7px;
       font-size: 0.9em;
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: 6px;
     }
 
     input[type="checkbox"] {
-      margin-right: 8px;
+      margin-right: 10px;
       vertical-align: middle;
     }
 
+    /* pill-btn-primary — Atlas-style pill button */
     button {
-      padding: 6px 14px;
+      padding: 8px 18px;
       font-size: 0.9em;
+      font-weight: 500;
       border: 1px solid var(--border);
-      border-radius: 4px;
-      background: #f9fafb;
+      border-radius: 999px;
+      background: white;
       color: var(--fg);
       cursor: pointer;
+      font-family: inherit;
     }
-
     button:hover { background: #f3f4f6; }
     button.primary {
-      background: var(--accent);
+      background: var(--umich-blue);
       color: white;
-      border-color: var(--accent);
+      border-color: var(--umich-blue);
+      padding: 8px 22px;
     }
-    button.primary:hover { background: #1d4ed8; }
+    button.primary:hover { background: #001a36; }
 
     .button-row {
       display: flex;
-      gap: 8px;
-      margin-top: 8px;
+      gap: 10px;
+      margin-top: 12px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .help {
       font-size: 0.8em;
-      color: var(--muted);
-      margin-top: 6px;
+      color: var(--fg-muted);
+      margin-top: 8px;
+    }
+    .help code {
+      background: #eef0f3;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.92em;
     }
 
     .pref-row {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       padding: 6px 0;
       font-size: 0.92em;
+      cursor: pointer;
     }
-
-    .pref-row label { cursor: pointer; }
-
-    .status {
+    .pref-row label {
+      cursor: pointer;
+      flex: 1;
+    }
+    .pref-row .pref-desc {
+      display: block;
       font-size: 0.85em;
-      padding: 6px 10px;
-      border-radius: 4px;
-      display: inline-block;
-      min-height: 1.4em;
+      color: var(--fg-muted);
+      margin-top: 2px;
+      font-weight: 400;
+    }
+    .pref-row label .pref-title {
+      font-weight: 500;
+      color: var(--fg);
     }
 
-    .status.ok   { background: var(--good-bg); color: var(--good-fg); }
-    .status.fail { background: var(--bad-bg);  color: var(--bad-fg); }
-    .status.idle { color: var(--muted); }
+    .min-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+
+    /* Atlas eval-card style chips */
+    .chip {
+      display: inline-block;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 0.8em;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .chip-default { background: #fff4d6; color: var(--orange); }
+    .chip-ok      { background: #e2efbf; color: var(--green); }
+    .chip-warn    { background: #fde2ee; color: var(--pink); }
+    .chip-info    { background: #e0eaf3; color: var(--blue); }
+    .chip-idle    { color: var(--fg-muted); }
 
     .banner {
-      background: var(--ok-bg);
-      color: var(--ok-fg);
-      padding: 8px 12px;
-      border-radius: 4px;
+      background: #fff4d6;
+      color: var(--orange);
+      padding: 10px 14px;
+      border-radius: 6px;
       font-size: 0.85em;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
       display: none;
     }
     .banner.visible { display: block; }
 
     .save-flash {
-      font-size: 0.8em;
-      color: var(--good-fg);
-      margin-left: 8px;
+      font-size: 0.82em;
+      color: var(--green);
       opacity: 0;
       transition: opacity 0.2s;
     }
     .save-flash.visible { opacity: 1; }
 
     footer {
-      margin-top: 40px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-      font-size: 0.75em;
-      color: var(--muted);
       text-align: center;
+      padding: 24px 12px;
+      font-size: 0.78em;
+      color: var(--fg-muted);
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
     }
+    footer a { color: var(--blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
 
-    footer a { color: var(--muted); }
+    .section-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 14px 0;
+    }
   </style>
 </head>
 <body>
-  <h1>Atlas x RMP — Options</h1>
-
-  <h2>RMP Auth Token</h2>
-
-  <div id="default-banner" class="banner">
-    Currently using the built-in default token. It works for now, but you should
-    paste a fresh token below — the default rotates without warning and will
-    eventually 401.
+  <div class="nav-bar">
+    <img src="../icons/icon48.png" alt="" />
+    <h1>Atlas &times; RMP — Options</h1>
   </div>
 
-  <div class="row">
-    <label class="block" for="token-input">Authorization header value</label>
-    <input
-      id="token-input"
-      type="text"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder="Basic ..."
-    />
-    <div class="button-row">
-      <button id="save-token" class="primary">Save</button>
-      <button id="test-token">Test token</button>
-      <span id="save-flash" class="save-flash">Saved</span>
-      <span id="test-status" class="status idle"></span>
+  <div class="wrapper">
+    <!-- ─── Token ────────────────────────────────────────────────────────── -->
+    <div class="card-container">
+      <h3 class="text-med">RMP authorization token</h3>
+      <p class="text-small card-description">
+        Used to call the RateMyProfessors GraphQL API. The built-in default works
+        for now but rotates without warning — paste a fresh one once it 401s.
+      </p>
+
+      <div id="default-banner" class="banner">
+        Currently using the built-in default token. Paste a fresh one below for reliability.
+      </div>
+
+      <div class="row">
+        <label class="block" for="token-input">Authorization header value</label>
+        <input
+          id="token-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Basic ..."
+        />
+        <div class="button-row">
+          <button id="save-token" class="primary">Save</button>
+          <button id="test-token">Test token</button>
+          <span id="test-status" class="chip chip-idle"></span>
+          <span id="save-flash" class="save-flash">Saved</span>
+        </div>
+        <p class="help">
+          Get your token from
+          <a href="https://www.ratemyprofessors.com/" target="_blank" rel="noopener">ratemyprofessors.com</a>
+          &rarr; DevTools &rarr; Network &rarr; any <code>/graphql</code> request &rarr; copy the
+          <code>Authorization</code> header value (starts with <code>Basic&nbsp;</code>).
+        </p>
+      </div>
     </div>
-    <p class="help">
-      Get your token from
-      <a href="https://www.ratemyprofessors.com/" target="_blank" rel="noopener">ratemyprofessors.com</a>
-      &rarr; DevTools &rarr; Network &rarr; any <code>/graphql</code> request &rarr; copy the
-      <code>Authorization</code> header value (starts with <code>Basic&nbsp;</code>).
-    </p>
-  </div>
 
-  <h2>Display preferences</h2>
+    <!-- ─── Display filters ──────────────────────────────────────────────── -->
+    <div class="card-container">
+      <h3 class="text-med">Display filters</h3>
+      <p class="text-small card-description">Hide noisy rows so only the sections you can take stand out.</p>
 
-  <div class="pref-row">
-    <input type="checkbox" id="pref-hideClosed" />
-    <label for="pref-hideClosed">Hide closed sections</label>
-  </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideClosed" />
+        <label for="pref-hideClosed">
+          <span class="pref-title">Hide closed sections</span>
+          <span class="pref-desc">Suppress section rows whose status is "closed".</span>
+        </label>
+      </div>
 
-  <div class="pref-row">
-    <input type="checkbox" id="pref-hideEmpty" />
-    <label for="pref-hideEmpty">Hide cards with no instructors posted</label>
-  </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideWait" />
+        <label for="pref-hideWait">
+          <span class="pref-title">Hide wait-list sections</span>
+          <span class="pref-desc">Suppress section rows whose status is "wait list".</span>
+        </label>
+      </div>
 
-  <div class="pref-row">
-    <input type="checkbox" id="pref-minRating" />
-    <label for="pref-minRating">
-      Hide sections where all instructors have RMP rating below:
-    </label>
-    <input type="number" id="pref-minRatingValue" min="0" max="5" step="0.1" value="0" style="margin-left: 8px;" />
-  </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideEmpty" />
+        <label for="pref-hideEmpty">
+          <span class="pref-title">Hide cards with no instructors posted</span>
+          <span class="pref-desc">Useful early in a term before instructor assignments publish.</span>
+        </label>
+      </div>
 
-  <div class="button-row">
-    <button id="save-prefs" class="primary">Save preferences</button>
-    <span id="prefs-flash" class="save-flash">Saved</span>
+      <div class="min-row">
+        <input type="checkbox" id="pref-minRating" />
+        <label for="pref-minRating">
+          Hide sections where all instructors have RMP rating below
+        </label>
+        <input type="number" id="pref-minRatingValue" min="0" max="5" step="0.1" value="0" />
+      </div>
+
+      <div class="button-row">
+        <button id="save-prefs" class="primary">Save preferences</button>
+        <span id="prefs-flash" class="save-flash">Saved</span>
+      </div>
+    </div>
+
+    <!-- ─── Per-page toggles ─────────────────────────────────────────────── -->
+    <div class="card-container">
+      <h3 class="text-med">Active on</h3>
+      <p class="text-small card-description">
+        Choose which Atlas/LSA pages get RMP badges. All on by default.
+      </p>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseDetail" />
+        <label for="page-courseDetail">
+          <span class="pref-title">Course detail</span>
+          <span class="pref-desc">Show RMP badges on Atlas course detail pages (e.g., /courses/EECS281/).</span>
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-instructorProfile" />
+        <label for="page-instructorProfile">
+          <span class="pref-title">Instructor profile</span>
+          <span class="pref-desc">Show RMP badges on Atlas instructor profile pages.</span>
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-dashboard" />
+        <label for="page-dashboard">
+          <span class="pref-title">Dashboard</span>
+          <span class="pref-desc">Show RMP badges on the Atlas dashboard / home pages.</span>
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-searchResults" />
+        <label for="page-searchResults">
+          <span class="pref-title">Browse Courses</span>
+          <span class="pref-desc">Enrich Atlas search-results cards with section + RMP badges.</span>
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-scheduleBuilder" />
+        <label for="page-scheduleBuilder">
+          <span class="pref-title">Schedule Builder</span>
+          <span class="pref-desc">Show RMP badges next to instructor names in Schedule Builder.</span>
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseGuide" />
+        <label for="page-courseGuide">
+          <span class="pref-title">LSA Course Guide</span>
+          <span class="pref-desc">Show RMP badges on webapps.lsa.umich.edu/cg/ search results.</span>
+        </label>
+      </div>
+
+      <div class="button-row">
+        <button id="save-pages" class="primary">Save active-on</button>
+        <span id="pages-flash" class="save-flash">Saved</span>
+      </div>
+    </div>
+
+    <!-- ─── Cache ────────────────────────────────────────────────────────── -->
+    <div class="card-container">
+      <h3 class="text-med">Cache</h3>
+      <p class="text-small card-description">
+        Local RMP lookups (per professor) and Atlas section-table-data extractions
+        (per course, 24-hour TTL) cached for speed.
+      </p>
+      <div class="button-row">
+        <span class="text-small"><span id="cache-count">0</span> entries cached</span>
+        <button id="clear-cache">Clear cache</button>
+      </div>
+    </div>
   </div>
 
   <footer>
-    v0.2.0 &middot;
+    <span>v0.3.0</span>
     <a href="https://github.com/ppabba101/atlas-rmp" target="_blank" rel="noopener">github.com/ppabba101/atlas-rmp</a>
   </footer>
 

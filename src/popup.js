@@ -1,19 +1,31 @@
-// Toolbar popup for Atlas x RMP — quick filter toggles + token/cache status.
-// Same chrome.storage.local keys as options.js so changes propagate everywhere.
+// Toolbar popup for Atlas x RMP — quick filter toggles + per-page enable
+// toggles + token/cache status. Same chrome.storage.local keys as options.js
+// so changes propagate to content.js and the Options page automatically.
 
 const RMP_AUTH_KEY     = "rmp:authToken";
 const RMP_DEFAULT_AUTH = "Basic dGVzdDp0ZXN0";
 const AUTH_FAILED_KEY  = "rmp:authFailed";
 
 const PREF_KEYS = {
-  hideClosedSections: "setting:hideClosedSections",
-  hideEmptyCards:     "setting:hideEmptyCards",
-  minRmpRating:       "setting:minRmpRating",
+  hideClosedSections:     "setting:hideClosedSections",
+  hideWaitlistedSections: "setting:hideWaitlistedSections",
+  hideEmptyCards:         "setting:hideEmptyCards",
+  minRmpRating:           "setting:minRmpRating",
+};
+
+// Per-page toggles. Default: all true. Mirrored in options.js + content.js.
+const PAGE_KEYS = {
+  courseDetail:      "setting:enableOnCourseDetail",
+  instructorProfile: "setting:enableOnInstructorProfile",
+  dashboard:         "setting:enableOnDashboard",
+  searchResults:     "setting:enableOnSearchResults",
+  scheduleBuilder:   "setting:enableOnScheduleBuilder",
+  courseGuide:       "setting:enableOnCourseGuide",
 };
 
 // chrome.storage entries that count as RMP cache: per-prof lookups (`prof:...`)
-// and per-detail enrichments (`atlas:detail:...`). The school-id, settings, and
-// auth-token entries are excluded.
+// and per-detail enrichments (`atlas:detail:...`). The school-id, settings,
+// and auth-token entries are excluded.
 const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:"];
 
 const $ = (id) => document.getElementById(id);
@@ -22,11 +34,12 @@ const $ = (id) => document.getElementById(id);
 
 function loadPrefs() {
   chrome.storage.local.get(Object.values(PREF_KEYS), (result) => {
-    $("pref-hideClosed").checked   = !!result[PREF_KEYS.hideClosedSections];
-    $("pref-hideEmpty").checked    = !!result[PREF_KEYS.hideEmptyCards];
+    $("pref-hideClosed").checked = !!result[PREF_KEYS.hideClosedSections];
+    $("pref-hideWait").checked   = !!result[PREF_KEYS.hideWaitlistedSections];
+    $("pref-hideEmpty").checked  = !!result[PREF_KEYS.hideEmptyCards];
     const minRating = Number(result[PREF_KEYS.minRmpRating]) || 0;
-    $("pref-minRating").checked    = minRating > 0;
-    $("pref-minRatingValue").value = minRating;
+    $("pref-minRating").checked      = minRating > 0;
+    $("pref-minRatingValue").value   = minRating;
   });
 }
 
@@ -41,6 +54,23 @@ function persistMinRating() {
   chrome.storage.local.set({ [PREF_KEYS.minRmpRating]: enabled ? clamped : 0 });
 }
 
+// ─── Per-page toggles ───────────────────────────────────────────────────────
+
+function loadPageToggles() {
+  chrome.storage.local.get(Object.values(PAGE_KEYS), (result) => {
+    for (const [name, key] of Object.entries(PAGE_KEYS)) {
+      const stored = result[key];
+      // Default: true when missing. Only `false` (strict) disables.
+      const enabled = stored === false ? false : true;
+      $("page-" + name).checked = enabled;
+    }
+  });
+}
+
+function persistPageToggle(name, checked) {
+  chrome.storage.local.set({ [PAGE_KEYS[name]]: checked });
+}
+
 // ─── Token status ───────────────────────────────────────────────────────────
 
 function loadTokenStatus() {
@@ -49,17 +79,17 @@ function loadTokenStatus() {
     const stored = result?.[RMP_AUTH_KEY];
     const failed = result?.[AUTH_FAILED_KEY];
     if (failed && failed.ts) {
-      el.className = "value-warn";
-      el.textContent = "expired (open options)";
+      el.className = "chip chip-warn";
+      el.textContent = "expired — open Options";
       el.onclick = openOptions;
       return;
     }
     if (typeof stored === "string" && stored.trim().length > 0 && stored !== RMP_DEFAULT_AUTH) {
-      el.className = "value-ok";
+      el.className = "chip chip-ok";
       el.textContent = "custom (OK)";
       el.onclick = null;
     } else {
-      el.className = "value-default";
+      el.className = "chip chip-default";
       el.textContent = "default";
       el.onclick = null;
     }
@@ -105,17 +135,27 @@ function openOptions(e) {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadPrefs();
+  loadPageToggles();
   loadTokenStatus();
   loadCacheCount();
 
   $("pref-hideClosed").addEventListener("change", (e) =>
     persistBoolPref(PREF_KEYS.hideClosedSections, e.target.checked)
   );
+  $("pref-hideWait").addEventListener("change", (e) =>
+    persistBoolPref(PREF_KEYS.hideWaitlistedSections, e.target.checked)
+  );
   $("pref-hideEmpty").addEventListener("change", (e) =>
     persistBoolPref(PREF_KEYS.hideEmptyCards, e.target.checked)
   );
   $("pref-minRating").addEventListener("change", persistMinRating);
   $("pref-minRatingValue").addEventListener("input", persistMinRating);
+
+  for (const name of Object.keys(PAGE_KEYS)) {
+    $("page-" + name).addEventListener("change", (e) =>
+      persistPageToggle(name, e.target.checked)
+    );
+  }
 
   $("clear-cache").addEventListener("click", (e) => {
     e.preventDefault();
@@ -130,5 +170,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (area !== "local") return;
     if (changes[RMP_AUTH_KEY] || changes[AUTH_FAILED_KEY]) loadTokenStatus();
     if (Object.values(PREF_KEYS).some((k) => changes[k])) loadPrefs();
+    if (Object.values(PAGE_KEYS).some((k) => changes[k])) loadPageToggles();
   });
 });

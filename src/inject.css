@@ -210,6 +210,11 @@
   display: none;
 }
 
+/* Hide wait-list section rows when "hide wait-list sections" is on. */
+.atlas-rmp-section.atlas-rmp-status-wait[data-hide-wait="true"] {
+  display: none;
+}
+
 /* Hide entire course cards that have no instructors posted yet. */
 .atlas-rmp-card-empty[data-hide-empty="true"] {
   display: none;

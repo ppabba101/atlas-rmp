@@ -98,24 +98,56 @@ const ENRICH_DEBOUNCE_MS = 200;                  // dispatcher debounce
 // chrome.storage.onChanged. CSS in inject.css does the actual hiding.
 
 const SETTING_KEYS = {
-  hideClosedSections: "setting:hideClosedSections",
-  hideEmptyCards:     "setting:hideEmptyCards",
-  minRmpRating:       "setting:minRmpRating",
+  hideClosedSections:     "setting:hideClosedSections",
+  hideWaitlistedSections: "setting:hideWaitlistedSections",
+  hideEmptyCards:         "setting:hideEmptyCards",
+  minRmpRating:           "setting:minRmpRating",
+};
+
+// Per-page enable toggles. detectPageType() return value → key. Defaults to true
+// when the storage entry is missing (only strict `false` disables annotation).
+const PAGE_ENABLE_KEYS = {
+  "course-detail":       "setting:enableOnCourseDetail",
+  "instructor-profile":  "setting:enableOnInstructorProfile",
+  "dashboard":           "setting:enableOnDashboard",
+  "search-results":      "setting:enableOnSearchResults",
+  "schedule-builder":    "setting:enableOnScheduleBuilder",
+  "course-guide":        "setting:enableOnCourseGuide",
 };
 
 let SETTINGS = {
-  hideClosedSections: false,
-  hideEmptyCards:     false,
-  minRmpRating:       0,
+  hideClosedSections:     false,
+  hideWaitlistedSections: false,
+  hideEmptyCards:         false,
+  minRmpRating:           0,
+  enabledPages: {
+    "course-detail":       true,
+    "instructor-profile":  true,
+    "dashboard":           true,
+    "search-results":      true,
+    "schedule-builder":    true,
+    "course-guide":        true,
+  },
 };
 
 function loadSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(Object.values(SETTING_KEYS), (result) => {
+    const allKeys = [
+      ...Object.values(SETTING_KEYS),
+      ...Object.values(PAGE_ENABLE_KEYS),
+    ];
+    chrome.storage.local.get(allKeys, (result) => {
+      const enabledPages = {};
+      for (const [page, key] of Object.entries(PAGE_ENABLE_KEYS)) {
+        // Default-true: only `false` strictly disables.
+        enabledPages[page] = result[key] === false ? false : true;
+      }
       SETTINGS = {
-        hideClosedSections: !!result[SETTING_KEYS.hideClosedSections],
-        hideEmptyCards:     !!result[SETTING_KEYS.hideEmptyCards],
-        minRmpRating:       Number(result[SETTING_KEYS.minRmpRating]) || 0,
+        hideClosedSections:     !!result[SETTING_KEYS.hideClosedSections],
+        hideWaitlistedSections: !!result[SETTING_KEYS.hideWaitlistedSections],
+        hideEmptyCards:         !!result[SETTING_KEYS.hideEmptyCards],
+        minRmpRating:           Number(result[SETTING_KEYS.minRmpRating]) || 0,
+        enabledPages,
       };
       resolve();
     });
@@ -129,8 +161,10 @@ function loadSettings() {
  */
 function applyFiltersToDom() {
   const closedFlag = SETTINGS.hideClosedSections ? "true" : "false";
+  const waitFlag   = SETTINGS.hideWaitlistedSections ? "true" : "false";
   for (const sec of document.querySelectorAll(".atlas-rmp-section")) {
     sec.setAttribute("data-hide-closed", closedFlag);
+    sec.setAttribute("data-hide-wait", waitFlag);
   }
 
   const emptyFlag = SETTINGS.hideEmptyCards ? "true" : "false";
@@ -585,6 +619,7 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
     // Filter data-attributes — read live SETTINGS so the row appears with the
     // correct visibility on first paint. Storage-change handler also re-applies.
     row.setAttribute("data-hide-closed", SETTINGS.hideClosedSections ? "true" : "false");
+    row.setAttribute("data-hide-wait", SETTINGS.hideWaitlistedSections ? "true" : "false");
 
     // data-min-best: the highest rating among this section's instructors, or
     // -1 if none have a rating. Used by the min-rating filter in
@@ -614,10 +649,19 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
     const statusSpan = document.createElement("span");
     statusSpan.className = `atlas-rmp-section-status ${statusClass(sec.status)}`;
     let statusText = statusLabel(sec.status);
+    // open  → "open · 73/234"   (open seats / enrollment cap)
+    // wait  → "wait list · 5"   (count on waitlist)
+    // closed→ "closed · 3 wl"   (closed but with N on waitlist)
     if (sec.status === "open" && typeof sec.openSeats === "number") {
       statusText += ` · ${sec.openSeats}/${sec.cap ?? "?"}`;
-    } else if ((sec.status === "wait list" || sec.status === "waitlist") && typeof sec.openSeats === "number") {
-      statusText += ` · ${sec.openSeats} wl`;
+    } else if (sec.status === "wait list" || sec.status === "waitlist") {
+      if (typeof sec.waitlistCount === "number") {
+        statusText += ` · ${sec.waitlistCount}`;
+      }
+    } else if (sec.status === "closed") {
+      if (typeof sec.waitlistCount === "number" && sec.waitlistCount > 0) {
+        statusText += ` · ${sec.waitlistCount} wl`;
+      }
     }
     statusSpan.textContent = statusText;
     header.appendChild(statusSpan);
@@ -758,7 +802,20 @@ async function processCard(job) {
             if (primary.length === 0) {
               primary = offered.filter((c) => c?.section_type && !SKIP.has(c.section_type));
             }
-            // Build a slim per-section record (everything we need to render)
+            // Build a slim per-section record (everything we need to render).
+            // Atlas's section-table-data uses snake_case throughout
+            // (`open_seat_count`, `enrollment_capacity`, `section_type`); the
+            // matching waitlist field is `waitlist_count`. We also tolerate
+            // `wait_list_count` and a camelCase fallback because the API has
+            // shipped variants in older snapshots and we'd rather show the
+            // count than swallow it silently.
+            const pickWaitlist = (c) => {
+              const candidates = [c.waitlist_count, c.wait_list_count, c.waitlistCount];
+              for (const v of candidates) {
+                if (typeof v === "number") return v;
+              }
+              return null;
+            };
             sections = primary.map((c) => {
               const m0 = c.meetings && c.meetings[0];
               return {
@@ -767,6 +824,7 @@ async function processCard(job) {
                 status: c.status,
                 openSeats: typeof c.open_seat_count === "number" ? c.open_seat_count : null,
                 cap: typeof c.enrollment_capacity === "number" ? c.enrollment_capacity : null,
+                waitlistCount: pickWaitlist(c),
                 days: m0?.days || [],
                 timeStart: m0?.time?.start || null,
                 timeEnd: m0?.time?.end || null,
@@ -850,6 +908,9 @@ function detectSearchResultsPage() {
  */
 function enrichSearchResults() {
   if (!detectSearchResultsPage()) return;
+  // Honor the per-page toggle: don't enrich Browse Courses cards when the user
+  // disables search-results in the popup/options.
+  if (SETTINGS.enabledPages && SETTINGS.enabledPages["search-results"] === false) return;
 
   const cards = document.querySelectorAll(".bookmarkable-card");
   for (const card of cards) {
@@ -934,6 +995,11 @@ function scan(root) {
   const pageType = detectPageType();
   if (!pageType) return;
 
+  // Per-page enable toggle (Feature: setting:enableOn{Page}). When the user
+  // disables a page in the popup/options, skip the entire scan for it. Default
+  // is enabled when the storage entry is missing (see loadSettings).
+  if (SETTINGS.enabledPages && SETTINGS.enabledPages[pageType] === false) return;
+
   // Only run selectors for the current page type. courseRow sub-selectors are
   // plain strings (not arrays) and must not be queried as instructor-name
   // elements — they're handled separately by captureAllCourses().
@@ -1003,13 +1069,24 @@ observer.observe(document.body, {
 // rendered cards pick up the latest data-attributes too.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  const watched = Object.values(SETTING_KEYS);
-  if (!watched.some((k) => changes[k])) return;
+  const watchedFilters = Object.values(SETTING_KEYS);
+  const watchedPages   = Object.values(PAGE_ENABLE_KEYS);
+  const filterChanged  = watchedFilters.some((k) => changes[k]);
+  const pageChanged    = watchedPages.some((k) => changes[k]);
+  if (!filterChanged && !pageChanged) return;
 
   loadSettings().then(() => {
     applyFiltersToDom();
     // Re-run enrichment so any newly-visible cards get the current settings.
     if (changes[SETTING_KEYS.hideEmptyCards]) {
+      invalidateAllEnrichments();
+      debouncedEnrich();
+    }
+    // If a per-page toggle flipped on, re-scan so newly-enabled pages get
+    // their badges back without a reload.
+    if (pageChanged) {
+      scan(document.body);
+      // Atlas's enricher is gated; force a re-run too.
       invalidateAllEnrichments();
       debouncedEnrich();
     }

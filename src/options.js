@@ -1,16 +1,28 @@
-// Options page for Atlas x RMP — manages RMP auth token + display preferences.
-// Uses chrome.storage.local for all persistence; the same keys are read by
-// background.js, content.js, and popup.js.
+// Options page for Atlas x RMP — manages RMP auth token, display preferences,
+// per-page toggles, and cache. Uses chrome.storage.local for all persistence;
+// the same keys are read by background.js, content.js, and popup.js.
 
 const RMP_AUTH_KEY      = "rmp:authToken";
 const RMP_DEFAULT_AUTH  = "Basic dGVzdDp0ZXN0";
 const RMP_ENDPOINT      = "https://www.ratemyprofessors.com/graphql";
 
 const PREF_KEYS = {
-  hideClosedSections: "setting:hideClosedSections",
-  hideEmptyCards:     "setting:hideEmptyCards",
-  minRmpRating:       "setting:minRmpRating",
+  hideClosedSections:     "setting:hideClosedSections",
+  hideWaitlistedSections: "setting:hideWaitlistedSections",
+  hideEmptyCards:         "setting:hideEmptyCards",
+  minRmpRating:           "setting:minRmpRating",
 };
+
+const PAGE_KEYS = {
+  courseDetail:      "setting:enableOnCourseDetail",
+  instructorProfile: "setting:enableOnInstructorProfile",
+  dashboard:         "setting:enableOnDashboard",
+  searchResults:     "setting:enableOnSearchResults",
+  scheduleBuilder:   "setting:enableOnScheduleBuilder",
+  courseGuide:       "setting:enableOnCourseGuide",
+};
+
+const CACHE_KEY_PREFIXES = ["prof:", "atlas:detail:"];
 
 // Trivial GraphQL ping used by the "Test token" button. Asks RMP for one school
 // matching "University of Michigan Ann Arbor" — small payload, exercises auth.
@@ -27,12 +39,14 @@ const PING_QUERY = `
 const $ = (id) => document.getElementById(id);
 
 function flash(el) {
+  if (!el) return;
   el.classList.add("visible");
   setTimeout(() => el.classList.remove("visible"), 1200);
 }
 
 function setStatus(el, kind, text) {
-  el.className = "status " + kind;
+  // kind: "ok" | "warn" | "info" | "idle"
+  el.className = "chip chip-" + kind;
   el.textContent = text;
 }
 
@@ -47,7 +61,7 @@ async function loadToken() {
       const stored = result?.[RMP_AUTH_KEY];
       if (typeof stored === "string" && stored.trim().length > 0) {
         tokenInput.value = stored;
-        banner.classList.remove("visible");
+        banner.classList.toggle("visible", stored === RMP_DEFAULT_AUTH);
       } else {
         tokenInput.value = "";
         banner.classList.add("visible");
@@ -86,7 +100,7 @@ async function testToken() {
 
   const value = (tokenInput.value || "").trim() || RMP_DEFAULT_AUTH;
 
-  setStatus(status, "idle", "Testing...");
+  setStatus(status, "info", "Testing...");
 
   try {
     const res = await fetch(RMP_ENDPOINT, {
@@ -103,11 +117,11 @@ async function testToken() {
     });
 
     if (res.status === 401) {
-      setStatus(status, "fail", "FAIL — 401 unauthorized (token invalid/expired)");
+      setStatus(status, "warn", "FAIL — 401 unauthorized (token invalid/expired)");
       return;
     }
     if (!res.ok) {
-      setStatus(status, "fail", `FAIL — HTTP ${res.status}`);
+      setStatus(status, "warn", `FAIL — HTTP ${res.status}`);
       return;
     }
     const data = await res.json();
@@ -115,10 +129,10 @@ async function testToken() {
     if (edges.length > 0) {
       setStatus(status, "ok", `OK — token works (HTTP ${res.status})`);
     } else {
-      setStatus(status, "fail", "FAIL — empty response (token may be wrong scope)");
+      setStatus(status, "warn", "FAIL — empty response (token may be wrong scope)");
     }
   } catch (e) {
-    setStatus(status, "fail", `FAIL — ${e.message || "network error"}`);
+    setStatus(status, "warn", `FAIL — ${e.message || "network error"}`);
   }
 }
 
@@ -127,11 +141,12 @@ async function testToken() {
 async function loadPrefs() {
   return new Promise((resolve) => {
     chrome.storage.local.get(Object.values(PREF_KEYS), (result) => {
-      $("pref-hideClosed").checked     = !!result[PREF_KEYS.hideClosedSections];
-      $("pref-hideEmpty").checked      = !!result[PREF_KEYS.hideEmptyCards];
+      $("pref-hideClosed").checked   = !!result[PREF_KEYS.hideClosedSections];
+      $("pref-hideWait").checked     = !!result[PREF_KEYS.hideWaitlistedSections];
+      $("pref-hideEmpty").checked    = !!result[PREF_KEYS.hideEmptyCards];
       const minRating = Number(result[PREF_KEYS.minRmpRating]) || 0;
-      $("pref-minRating").checked      = minRating > 0;
-      $("pref-minRatingValue").value   = minRating;
+      $("pref-minRating").checked    = minRating > 0;
+      $("pref-minRatingValue").value = minRating;
       resolve();
     });
   });
@@ -144,12 +159,63 @@ function savePrefs() {
   const minClamped = Number.isFinite(minVal) ? Math.max(0, Math.min(5, minVal)) : 0;
 
   const payload = {
-    [PREF_KEYS.hideClosedSections]: $("pref-hideClosed").checked,
-    [PREF_KEYS.hideEmptyCards]:     $("pref-hideEmpty").checked,
-    [PREF_KEYS.minRmpRating]:       minEnabled ? minClamped : 0,
+    [PREF_KEYS.hideClosedSections]:     $("pref-hideClosed").checked,
+    [PREF_KEYS.hideWaitlistedSections]: $("pref-hideWait").checked,
+    [PREF_KEYS.hideEmptyCards]:         $("pref-hideEmpty").checked,
+    [PREF_KEYS.minRmpRating]:           minEnabled ? minClamped : 0,
   };
 
   chrome.storage.local.set(payload, () => flash(flashEl));
+}
+
+// ─── Per-page toggles section ───────────────────────────────────────────────
+
+async function loadPageToggles() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(Object.values(PAGE_KEYS), (result) => {
+      for (const [name, key] of Object.entries(PAGE_KEYS)) {
+        const stored = result[key];
+        // Default-true: only `false` (strict) disables.
+        const enabled = stored === false ? false : true;
+        $("page-" + name).checked = enabled;
+      }
+      resolve();
+    });
+  });
+}
+
+function savePageToggles() {
+  const flashEl = $("pages-flash");
+  const payload = {};
+  for (const [name, key] of Object.entries(PAGE_KEYS)) {
+    payload[key] = $("page-" + name).checked;
+  }
+  chrome.storage.local.set(payload, () => flash(flashEl));
+}
+
+// ─── Cache section ──────────────────────────────────────────────────────────
+
+function loadCacheCount() {
+  chrome.storage.local.get(null, (all) => {
+    const keys = Object.keys(all || {});
+    const count = keys.filter((k) =>
+      CACHE_KEY_PREFIXES.some((p) => k.startsWith(p))
+    ).length;
+    $("cache-count").textContent = String(count);
+  });
+}
+
+function clearCache() {
+  chrome.storage.local.get(null, (all) => {
+    const keys = Object.keys(all || {}).filter((k) =>
+      CACHE_KEY_PREFIXES.some((p) => k.startsWith(p))
+    );
+    if (keys.length === 0) {
+      loadCacheCount();
+      return;
+    }
+    chrome.storage.local.remove(keys, () => loadCacheCount());
+  });
 }
 
 // ─── Wire up ────────────────────────────────────────────────────────────────
@@ -157,16 +223,34 @@ function savePrefs() {
 document.addEventListener("DOMContentLoaded", () => {
   loadToken();
   loadPrefs();
+  loadPageToggles();
+  loadCacheCount();
 
   $("save-token").addEventListener("click", saveToken);
   $("test-token").addEventListener("click", testToken);
   $("save-prefs").addEventListener("click", savePrefs);
+  $("save-pages").addEventListener("click", savePageToggles);
+  $("clear-cache").addEventListener("click", clearCache);
 
   // Enter key inside the token input acts like Save.
   $("token-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       saveToken();
+    }
+  });
+
+  // Live updates: reflect changes pushed from the popup or another tab.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[RMP_AUTH_KEY]) loadToken();
+    if (Object.values(PREF_KEYS).some((k) => changes[k])) loadPrefs();
+    if (Object.values(PAGE_KEYS).some((k) => changes[k])) loadPageToggles();
+    // Any cache key change — refresh count.
+    if (Object.keys(changes).some((k) =>
+      CACHE_KEY_PREFIXES.some((p) => k.startsWith(p))
+    )) {
+      loadCacheCount();
     }
   });
 });
