@@ -4,7 +4,7 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-brightgreen.svg)
-![GitHub stars](https://img.shields.io/github/stars/pranavpabba/atlas-rmp?style=social)
+![GitHub stars](https://img.shields.io/github/stars/ppabba101/atlas-rmp?style=social)
 
 ## What it does
 
