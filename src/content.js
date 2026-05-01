@@ -265,6 +265,41 @@ async function isAuthFailed() {
   return Date.now() - authFailedTs < AUTH_FAIL_TTL_MS;
 }
 
+// ─── CG auth-needed mirror ──────────────────────────────────────────────────
+//
+// Mirrors `cg:authNeeded` into module scope so processCard can synchronously
+// distinguish "CG returned no data because auth is bad" from "CG returned no
+// data because the course isn't in CG". The same listener also reacts to
+// re-auth (set→unset transition) by invalidating Browse Courses enrichments
+// — visible cards may have cached merged-without-waitlist results from the
+// outage, and we want them to re-fetch on the spot rather than wait 24h for
+// the atlas:detail TTL to expire.
+let cgAuthNeededTs = null;
+let cgAuthNeededPrimed = false;
+const cgAuthNeededReady = new Promise((resolve) => {
+  chrome.storage.local.get("cg:authNeeded", (result) => {
+    if (!cgAuthNeededPrimed) {
+      cgAuthNeededTs = result["cg:authNeeded"]?.ts ?? null;
+      cgAuthNeededPrimed = true;
+    }
+    resolve();
+  });
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes["cg:authNeeded"]) return;
+  const oldTs = cgAuthNeededTs;
+  cgAuthNeededTs = changes["cg:authNeeded"].newValue?.ts ?? null;
+  cgAuthNeededPrimed = true;
+  // SET → UNSET = re-auth just succeeded. Force visible Browse Courses cards
+  // to re-process; the cache-hit gate below will reject any cgComplete:false
+  // entries since cgAuthNeededTs is now null, and processCard will re-fetch
+  // with fresh CG data.
+  if (oldTs && !cgAuthNeededTs && detectPageType() === "search-results") {
+    invalidateAllEnrichments();
+    debouncedEnrich();
+  }
+});
+
 // ─── Badge rendering ────────────────────────────────────────────────────────
 
 /**
@@ -1093,7 +1128,16 @@ async function processCard(job) {
     let sections = null;
 
     const cached = await getDetailCache(cacheKey);
-    if (cached && Array.isArray(cached.sections)) {
+    // Reject cached entries whose CG merge was incomplete (CG auth was down
+    // when first written) once CG is back — otherwise re-auth recovery is
+    // invisible until the 24h TTL expires. Legacy entries without a
+    // cgComplete field are treated as complete (undefined !== false).
+    await cgAuthNeededReady;
+    const cacheUsable =
+      cached
+      && Array.isArray(cached.sections)
+      && (cached.cgComplete !== false || cgAuthNeededTs !== null);
+    if (cacheUsable) {
       sections = cached.sections;
       // Re-derive unique instructors for RMP lookup
       const seen = new Set();
@@ -1202,6 +1246,7 @@ async function processCard(job) {
       // authoritative view. Merge per-section: override status, fill in
       // waitlistCount, and (if Atlas was missing it) backfill openSeats.
       // Failures fall through silently — Atlas data alone is still rendered.
+      let cgComplete = true;
       if (sections.length > 0 && termCode) {
         try {
           const knownSections = sections.map((s) => s.section).filter(Boolean);
@@ -1216,13 +1261,18 @@ async function processCard(job) {
                 sec.openSeats = cg.openSeats;
               }
             }
+          } else if (cgAuthNeededTs !== null) {
+            // CG returned no data AND the auth flag is set → assume auth was
+            // the cause (vs. "course isn't in CG"). Mark the cache entry so
+            // it's rejected on re-auth and re-fetched with fresh CG data.
+            cgComplete = false;
           }
         } catch (e) {
           console.warn("[atlas-rmp] CG merge failed:", courseCode, termCode, e.message);
         }
       }
 
-      setDetailCache(cacheKey, { sections });
+      setDetailCache(cacheKey, { sections, cgComplete });
     }
 
     const authFailed = await isAuthFailed();
