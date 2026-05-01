@@ -35,17 +35,9 @@ const SELECTORS = {
     'h1.text-large',
   ],
 
-  // dashboard: instructor names visible on user dashboard
-  // Same href pattern likely works (links to recently-viewed instructors).
-  // Validate by visiting the dashboard with the extension loaded.
-  "dashboard": [
-    'a[href*="/instructor/"]',
-  ],
-
   // browse-instructors: Atlas Browse Instructors page (atlas.ai.umich.edu/instructors/)
   // Each card is a <bookmarkable-card> whose primary link points at /instructor/...
-  // Same href pattern that works for course-detail / dashboard links — the
-  // <a> contains the instructor's name as its visible text.
+  // The <a> contains the instructor's name as its visible text.
   "browse-instructors": [
     'a[href*="/instructor/"]',
   ],
@@ -117,7 +109,6 @@ const SETTING_KEYS = {
 const PAGE_ENABLE_KEYS = {
   "course-detail":       "setting:enableOnCourseDetail",
   "instructor-profile":  "setting:enableOnInstructorProfile",
-  "dashboard":           "setting:enableOnDashboard",
   "search-results":      "setting:enableOnSearchResults",
   "schedule-builder":    "setting:enableOnScheduleBuilder",
   "course-guide":        "setting:enableOnCourseGuide",
@@ -132,7 +123,6 @@ let SETTINGS = {
   enabledPages: {
     "course-detail":       true,
     "instructor-profile":  true,
-    "dashboard":           true,
     "search-results":      true,
     "schedule-builder":    true,
     "course-guide":        true,
@@ -1244,8 +1234,7 @@ function debouncedEnrich() {
  * Detect which page type we're on based on URL. Returns one of the SELECTORS
  * keys, or null if we should not annotate. URL-gating prevents selectors like
  * `h1.text-large` (only valid on instructor profiles) from firing on every
- * page and badging non-name headings (e.g., "Browse Courses", user's own name
- * on the dashboard).
+ * page and badging non-name headings (e.g., "Browse Courses").
  *
  * @returns {string|null}
  */
@@ -1271,7 +1260,6 @@ function detectPageType() {
     if (path === "/courses" || path === "/courses/" || path.startsWith("/course-search")) {
       return "search-results";
     }
-    if (path === "/" || path.startsWith("/my-dashboard")) return "dashboard";
   }
 
   return null;

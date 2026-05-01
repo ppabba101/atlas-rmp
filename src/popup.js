@@ -18,7 +18,6 @@ const PREF_KEYS = {
 const PAGE_KEYS = {
   courseDetail:      "setting:enableOnCourseDetail",
   instructorProfile: "setting:enableOnInstructorProfile",
-  dashboard:         "setting:enableOnDashboard",
   searchResults:     "setting:enableOnSearchResults",
   scheduleBuilder:   "setting:enableOnScheduleBuilder",
   courseGuide:       "setting:enableOnCourseGuide",
