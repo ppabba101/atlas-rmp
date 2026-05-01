@@ -238,17 +238,25 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = ATLAS_FETCH_TIMEO
 // Cached in module scope and refreshed via storage.onChanged so a Browse
 // Courses page with 50+ instructors doesn't fire 100+ chrome.storage.local
 // reads (annotate calls this both before and after every LOOKUP).
-let authFailedTs = null; // ms timestamp, or null when no flag is set
+let authFailedTs = null;       // ms timestamp, or null when no flag is set
+let authFailedPrimed = false;  // true once a real value has been seen (bootstrap or onChanged)
 const authFailedReady = new Promise((resolve) => {
   chrome.storage.local.get("rmp:authFailed", (result) => {
-    const entry = result["rmp:authFailed"];
-    authFailedTs = entry?.ts ?? null;
+    // Only seed from the bootstrap read if storage.onChanged hasn't already
+    // delivered a fresher value while this get() was in flight. Otherwise
+    // the stale snapshot from get() would clobber it.
+    if (!authFailedPrimed) {
+      const entry = result["rmp:authFailed"];
+      authFailedTs = entry?.ts ?? null;
+      authFailedPrimed = true;
+    }
     resolve();
   });
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes["rmp:authFailed"]) return;
   authFailedTs = changes["rmp:authFailed"].newValue?.ts ?? null;
+  authFailedPrimed = true;
 });
 
 async function isAuthFailed() {
@@ -466,13 +474,23 @@ async function annotate(el) {
   if (annotatedFor === "pending") return;
   if (annotatedFor === name) return;
   if (annotatedFor) {
-    // Strip ALL consecutive .rmp-badge siblings — past race conditions could
-    // have left more than one (visible as "4.44.4" doubled rating).
+    // Strip every previously-injected badge regardless of where insertBadge
+    // placed it. Three placement cases to cover (mirrors the three branches
+    // in insertBadge):
+    //   1. Sibling — badge directly follows el.
+    //   2. Inner-anchor — badge follows a descendant of el (element is a
+    //      heading or wrapper that contains the name as inner text).
+    //   3. .atlas-rmp-wrap — badge is a sibling inside the wrapper that
+    //      now contains both el and the badge.
     let next = el.nextElementSibling;
     while (next && next.classList.contains("rmp-badge")) {
       const after = next.nextElementSibling;
       next.remove();
       next = after;
+    }
+    for (const inner of el.querySelectorAll(".rmp-badge")) inner.remove();
+    if (el.parentElement?.classList.contains("atlas-rmp-wrap")) {
+      for (const sib of el.parentElement.querySelectorAll(".rmp-badge")) sib.remove();
     }
   }
 
