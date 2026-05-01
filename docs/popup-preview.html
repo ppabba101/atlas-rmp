@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Popup preview (screenshot only)</title>
+<script>
+  // Stub chrome.* APIs so the real popup.js runs unmodified outside the
+  // extension context. Seeded with realistic state for the screenshot.
+  (function () {
+    const seed = {
+      "setting:hideClosedSections":     true,
+      "setting:hideWaitlistedSections": false,
+      "setting:hideEmptyCards":         true,
+      "setting:minRmpRating":           3.5,
+      // page toggles intentionally omitted — popup defaults to "true" when missing
+      "rmp:authToken":                  null,         // → "default" chip
+      "rmp:authFailed":                 null,         // → no warning
+      "cg:authNeeded":                  null,         // → CG card stays hidden
+      // No prof:/atlas:detail:/cg:section: cache keys → 0 entries
+    };
+    const store = Object.assign({}, seed);
+    const listeners = [];
+    function get(keys, cb) {
+      const out = {};
+      const wanted = keys == null
+        ? Object.keys(store)
+        : Array.isArray(keys) ? keys : [keys];
+      for (const k of wanted) if (store[k] !== undefined) out[k] = store[k];
+      cb && setTimeout(() => cb(out), 0);
+    }
+    function set(obj, cb) {
+      const changes = {};
+      for (const [k, v] of Object.entries(obj)) {
+        changes[k] = { oldValue: store[k], newValue: v };
+        store[k] = v;
+      }
+      cb && setTimeout(cb, 0);
+      for (const fn of listeners) fn(changes, "local");
+    }
+    window.chrome = {
+      storage: {
+        local: { get, set, remove: (_keys, cb) => cb && cb() },
+        onChanged: { addListener: (fn) => listeners.push(fn) },
+      },
+      runtime: {
+        sendMessage: () => {},
+        openOptionsPage: () => {},
+        getURL: (p) => p,
+      },
+      tabs: { create: () => {} },
+    };
+  })();
+</script>
+<style>
+  /* Match Atlas's neutral page background so the popup card-shadows read */
+  html, body {
+    margin: 0;
+    padding: 24px;
+    background: #f3f4f7;
+  }
+  /* Body shrinks to popup height so fullPage screenshot has no trailing blank space */
+  html { height: auto; }
+  body { height: auto; }
+  /* The popup body is hard-coded to width:340px, but it overrides body styles
+     globally. Scope its rules by wrapping in a positioning shell. */
+  .popup-shell {
+    width: 340px;
+    margin: 0 auto;
+    background: #f3f4f7;
+    box-shadow: 0 8px 32px rgba(17, 24, 39, 0.10);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+<div class="popup-shell">
+  <div class="wrapper">
+    <header style="display:flex;align-items:center;gap:10px;padding:14px 16px 4px;background:#f3f4f7;">
+      <img src="../icons/icon48.png" alt="" style="width:42px;height:42px;" />
+      <span style="font-weight:700;font-size:1.85em;letter-spacing:0.01em;color:#000;font-family:'Usual',Helvetica,Arial,sans-serif;">Atlas &times; RMP</span>
+    </header>
+    <div id="cg-auth-card" class="card-container" style="display:none;border-left:3px solid #ea580c;">
+      <h3 class="text-med" style="color:#9a3412;">LSA Course Guide auth expired</h3>
+      <p class="text-small card-description">Waitlist counts on Browse Courses won't load until you re-authenticate to LSA Course Guide.</p>
+      <div class="row">
+        <button id="cg-reauth-btn" style="background:#ea580c;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:0.85em;font-weight:600;cursor:pointer;">Re-authenticate to CG</button>
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Display filters</h3>
+      <p class="text-small card-description">Hide noisy rows, focus on what matters.</p>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideClosed" />
+        <label for="pref-hideClosed">Hide closed sections</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideWait" />
+        <label for="pref-hideWait">Hide wait-list sections</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-hideEmpty" />
+        <label for="pref-hideEmpty">Hide cards with no instructors</label>
+      </div>
+      <div class="min-row">
+        <input type="checkbox" id="pref-minRating" />
+        <label for="pref-minRating">Min RMP rating:</label>
+        <input type="number" id="pref-minRatingValue" min="0" max="5" step="0.1" value="0" />
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Active on</h3>
+      <p class="text-small card-description">Choose which pages get RMP badges.</p>
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseDetail" />
+        <label for="page-courseDetail">Course detail</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-instructorProfile" />
+        <label for="page-instructorProfile">Instructor profile</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-browseInstructors" />
+        <label for="page-browseInstructors">Browse Instructors</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-searchResults" />
+        <label for="page-searchResults">Browse Courses</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-scheduleBuilder" />
+        <label for="page-scheduleBuilder">Schedule Builder</label>
+      </div>
+      <div class="pref-row">
+        <input type="checkbox" id="page-courseGuide" />
+        <label for="page-courseGuide">LSA Course Guide</label>
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Token status</h3>
+      <p class="text-small card-description">RMP authorization header used for lookups.</p>
+      <div class="row">
+        <span class="text-small">Status</span>
+        <span id="token-status" class="chip chip-default">checking...</span>
+      </div>
+    </div>
+
+    <div class="card-container">
+      <h3 class="text-med">Cache</h3>
+      <p class="text-small card-description">RMP lookups, Atlas section data, and CG waitlist counts cached for speed.</p>
+      <div class="row">
+        <span class="text-small"><span id="cache-count">0</span> entries</span>
+        <a id="clear-cache" class="action">Clear cache</a>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a id="open-options" class="action">Open full Options &rarr;</a>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Scoped popup styles — copied verbatim from src/popup.html so the preview
+     renders identically to the real popup. */
+  @font-face { font-family:"Usual"; src:url("../src/fonts/Usual-Regular.otf") format("opentype"); font-weight:400; font-style:normal; font-display:swap; }
+  @font-face { font-family:"Usual"; src:url("../src/fonts/Usual-Italic.otf") format("opentype"); font-weight:400; font-style:italic; font-display:swap; }
+  @font-face { font-family:"Usual"; src:url("../src/fonts/Usual-Bold.otf") format("opentype"); font-weight:700; font-style:normal; font-display:swap; }
+  @font-face { font-family:"Usual"; src:url("../src/fonts/Usual-BoldItalic.otf") format("opentype"); font-weight:700; font-style:italic; font-display:swap; }
+
+  .popup-shell {
+    --umich-blue:   #00274C;
+    --umich-maize:  #FFCB05;
+    --pink:         #d32582;
+    --green:        #60800c;
+    --blue:         #245389;
+    --purple:       #8f29ad;
+    --orange:       #ba5b00;
+    --bg-page:      #f3f4f7;
+    --bg-card:      #ffffff;
+    --fg:           #000000;
+    --fg-muted:     #6b7280;
+    --border:       #e5e7eb;
+    --shadow:       0 4px 14px #b9c1cc;
+    font-family: "Usual", Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.42857;
+  }
+  .popup-shell .wrapper { padding: 8px 0; display: flex; flex-direction: column; gap: 0; }
+  .popup-shell .card-container {
+    background: var(--bg-card);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 12px 16px 14px;
+    margin: 8px 12px;
+    position: relative;
+  }
+  .popup-shell a, .popup-shell a:visited { color: #3c6dea; text-decoration: none; }
+  .popup-shell a:hover { text-decoration: underline; }
+  .popup-shell .text-med { font-size: 1em; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+  .popup-shell .text-small { font-size: 0.85em; color: var(--fg-muted); }
+  .popup-shell .card-description { margin: 0 0 10px; }
+  .popup-shell .pref-row { display: flex; align-items: center; padding: 4px 0; cursor: pointer; }
+  .popup-shell .pref-row label { flex: 1; cursor: pointer; }
+  .popup-shell .pref-row input[type="checkbox"] { margin-right: 8px; }
+  .popup-shell .min-row { display: flex; align-items: center; padding: 4px 0; gap: 6px; }
+  .popup-shell .min-row label { flex: 0 0 auto; }
+  .popup-shell input[type="number"] { width: 56px; padding: 3px 5px; font-size: 0.95em; border: 1px solid var(--border); border-radius: 4px; }
+  .popup-shell .chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.78em; font-weight: 600; letter-spacing: 0.01em; }
+  .popup-shell .chip-default { background: #fff4d6; color: var(--orange); }
+  .popup-shell .chip-ok      { background: #e2efbf; color: var(--green); }
+  .popup-shell .chip-warn    { background: #fde2ee; color: var(--pink); cursor: pointer; text-decoration: none; }
+  .popup-shell .row { display: flex; justify-content: flex-start; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .popup-shell .row + .row { margin-top: 6px; }
+  .popup-shell a.action { color: #3c6dea; text-decoration: none; cursor: pointer; font-size: 0.85em; }
+  .popup-shell a.action:hover { text-decoration: underline; }
+  .popup-shell .footer { text-align: right; padding: 4px 2em 1.5em; }
+</style>
+
+<script type="module" src="../src/popup.js"></script>
+</body>
+</html>

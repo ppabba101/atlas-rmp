@@ -2,6 +2,8 @@
 
 > RateMyProfessor scores inline on UMich Atlas — see who teaches well before you enroll.
 
+![Atlas × RMP renders RMP rating badges and per-section detail directly inside Atlas Browse Courses cards](docs/screenshots/hero.png)
+
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-brightgreen.svg)
 ![GitHub stars](https://img.shields.io/github/stars/ppabba101/atlas-rmp?style=social)
@@ -9,6 +11,8 @@
 ## What it does
 
 Atlas × RMP injects RateMyProfessor rating badges next to instructor names on UMich Atlas, the LSA Course Guide, and Schedule Builder — no tab-switching, no copy-pasting names. Badges appear automatically as you browse; ratings are cached locally for 7 days and matched by name with a confidence warning (⚠️) when the match is fuzzy.
+
+![Atlas × RMP in action — badges populate as you browse, and the popup's display filters live-update what's visible without a reload](docs/screenshots/demo.gif)
 
 | Where | What you see |
 |---|---|
@@ -18,6 +22,10 @@ Atlas × RMP injects RateMyProfessor rating badges next to instructor names on U
 | Atlas instructor profile | Badge next to the heading |
 | Atlas Schedule Builder | Badge next to each section's instructor |
 | LSA Course Guide | Badge next to instructor mailto links |
+
+### Reading the badges
+
+![Badge color guide: green for rating 4.0+, yellow for 3.0–3.9, red for under 3.0, gray "no ratings" for profiles found on RMP but unrated, gray "no RMP" when no profile match, red "auth expired" when the token rotated, and a warning glyph for fuzzy name matches](docs/screenshots/badge-legend.png)
 
 ## Heads up: this is a fragile, unofficial plugin
 
@@ -40,7 +48,11 @@ The extension only works for **current UMich students with active SSO + Okta acc
 3. Open [Atlas](https://atlas.ai.umich.edu) — log in via UMich SSO + Okta first
 4. Done — badges appear automatically next to instructor names
 
-The extension toolbar icon opens a popup with display filters, per-page enable toggles, the RMP token status, and a cache control. Right-click the icon → **Options** for the full settings page.
+The extension toolbar icon opens this popup with display filters, per-page enable toggles, the RMP token status, and a cache control:
+
+<p align="center"><img src="docs/screenshots/popup.png" alt="Atlas × RMP toolbar popup: Display filters (Hide closed sections, Hide wait-list sections, Hide cards with no instructors, Min RMP rating), Active on (per-page toggles), Token status, and Cache controls" width="380" /></p>
+
+Right-click the icon → **Options** for the full settings page (token management with masked input + Test token, per-page toggles with descriptions, and cache controls).
 
 ## Updating the RMP token
 
@@ -49,6 +61,13 @@ The extension ships with RMP's public default token (`Basic dGVzdDp0ZXN0`). When
 1. Open `ratemyprofessors.com` in Chrome → DevTools (`F12`) → **Network** tab → search any professor.
 2. Click any `graphql` request → **Headers** → copy the `Authorization` value (starts with `Basic `).
 3. Click the extension's toolbar icon → **Open full Options →** → paste into the token field → **Save**.
+
+<details>
+<summary>Full Options page screenshot</summary>
+
+![Full Atlas × RMP Options page: Display filters with descriptions, Active on with per-page descriptions, RMP authorization token card with default-token banner and password-masked input plus Save / Test token / Show buttons, and Cache controls](docs/screenshots/options.png)
+
+</details>
 
 ## Troubleshooting
 

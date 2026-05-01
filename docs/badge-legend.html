@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Atlas × RMP — Badge Guide</title>
+<link rel="stylesheet" href="../src/inject.css" />
+<style>
+  :root {
+    --fg: #111827;
+    --fg-muted: #4b5563;
+    --fg-faint: #9ca3af;
+    --line: #e5e7eb;
+    --bg: #ffffff;
+    --row-bg: #fafafa;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame {
+    width: 920px;
+    margin: 0 auto;
+    padding: 36px 40px 40px;
+  }
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+  }
+  .title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: var(--fg-muted);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 28px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--row-bg);
+  }
+  .row .demo {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-size: 14px;
+    color: #1f2937;
+  }
+  .demo .name {
+    font-weight: 500;
+  }
+  .row .label {
+    font-size: 12px;
+    color: var(--fg-muted);
+    line-height: 1.4;
+  }
+  .row .label strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  /* Tighten the badge for legend density without changing semantics */
+  .row .rmp-badge { font-size: 12px; }
+  .row .rmp-warn { font-size: 13px; }
+
+  /* Auth-fail row spans both columns since the badge is wide */
+  .row.wide {
+    grid-column: 1 / -1;
+  }
+
+  .footer {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--fg-faint);
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="header">
+      <div class="title">Atlas × RMP — badge guide</div>
+      <div class="subtitle">what each color means</div>
+    </div>
+
+    <div class="grid">
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <a class="rmp-badge rmp-good" href="#">4.5</a>
+        </div>
+        <div class="label"><strong>Rating &ge; 4.0</strong> &middot; click to open RMP profile</div>
+      </div>
+
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <a class="rmp-badge rmp-ok" href="#">3.2</a>
+        </div>
+        <div class="label"><strong>Rating 3.0&ndash;3.9</strong> &middot; click to open RMP profile</div>
+      </div>
+
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <a class="rmp-badge rmp-bad" href="#">2.1</a>
+        </div>
+        <div class="label"><strong>Rating &lt; 3.0</strong> &middot; click to open RMP profile</div>
+      </div>
+
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <a class="rmp-badge rmp-ok" href="#">3.8<span class="rmp-warn" title="Fuzzy name match">&#x26A0;&#xFE0F;</span></a>
+        </div>
+        <div class="label"><strong>Fuzzy name match</strong> (confidence &lt; 95%) &middot; verify the profile before trusting</div>
+      </div>
+
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <a class="rmp-badge rmp-miss" href="#">no ratings</a>
+        </div>
+        <div class="label"><strong>On RMP, no ratings yet</strong> &middot; click to open the empty profile</div>
+      </div>
+
+      <div class="row">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <span class="rmp-badge rmp-miss">no RMP</span>
+        </div>
+        <div class="label"><strong>No matching RMP profile</strong> &middot; not on RMP, or name doesn&rsquo;t match</div>
+      </div>
+
+      <div class="row wide">
+        <div class="demo">
+          <span class="name">Smith, John</span>
+          <span class="rmp-badge rmp-auth-fail">RMP auth expired &mdash; update token in Options</span>
+        </div>
+        <div class="label"><strong>RMP rotated their public token</strong> &middot; open the extension popup &rarr; Options &rarr; paste a fresh token</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>github.com/ppabba101/atlas-rmp</div>
+      <div>v1 &middot; MIT</div>
+    </div>
+  </div>
+</body>
+</html>
