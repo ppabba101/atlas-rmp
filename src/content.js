@@ -467,6 +467,11 @@ async function annotate(el) {
   const authFailed = await isAuthFailed();
 
   if (authFailed) {
+    const nowPageType = detectPageType();
+    if (!nowPageType || SETTINGS.enabledPages?.[nowPageType] === false) {
+      el.removeAttribute(BADGE_ATTR);
+      return;
+    }
     el.setAttribute(BADGE_ATTR, name);
     insertBadge(el, name, badgeHTML(null, true));
     return;
@@ -500,6 +505,15 @@ async function annotate(el) {
   el.setAttribute(BADGE_ATTR, name);
 
   const newAuthFailed = result?.reason === "auth-failed" || (await isAuthFailed());
+
+  // Race guard: the user may have toggled this page off while LOOKUP was in
+  // flight. Don't re-inject badges after a removal pass already ran.
+  const nowPageType = detectPageType();
+  if (!nowPageType || SETTINGS.enabledPages?.[nowPageType] === false) {
+    el.removeAttribute(BADGE_ATTR);
+    return;
+  }
+
   insertBadge(el, name, badgeHTML(result, newAuthFailed));
 }
 
@@ -1209,6 +1223,17 @@ async function processCard(job) {
       for (const [n, r] of resolved) nameToResult.set(n, r);
     }
 
+    // Race guard: the user may have toggled Browse Courses off (or navigated
+    // away) while we were fetching. Skip rendering — the page-toggle handler
+    // already ran removeAllAnnotations to clear in-flight loading rows.
+    if (SETTINGS.enabledPages?.["search-results"] === false ||
+        detectPageType() !== "search-results") {
+      card.removeAttribute(ATLAS_ENRICH_ATTR);
+      const loading = card.querySelector(".atlas-rmp-loading");
+      if (loading) loading.remove();
+      return;
+    }
+
     const finalAuthFailed = authFailed || [...nameToResult.values()].some((r) => r?.reason === "auth-failed");
     renderSectionList(card, sections || [], nameToResult, finalAuthFailed);
     // Re-run the filter pass so the card-level all-hidden check sees these
@@ -1406,12 +1431,86 @@ observer.observe(document.body, {
   characterDataOldValue: true,
 });
 
+// ─── DOM cleanup ────────────────────────────────────────────────────────────
+
+/**
+ * Strip every piece of state this extension injected into the page. Called
+ * when a page toggle flips OFF so the page returns to its native rendering
+ * without requiring a reload.
+ *
+ * Covers:
+ *   • RMP badges everywhere (.rmp-badge)
+ *   • inline-flex wrappers around (link + badge) on Browse Instructors
+ *   • BADGE_ATTR markers on annotated elements
+ *   • ATLAS_ENRICH_ATTR markers on Browse Courses cards + their queued jobs
+ *   • the per-card section list / loading / empty-state injections
+ *   • atlas-rmp-* helper classes and data-* attributes used for filtering
+ *   • inline display:none we set when all sections were filtered out
+ *
+ * Intentionally untouched: chrome.storage cache (kept for when the user
+ * toggles the page back on), settings, RMP token.
+ */
+function removeAllAnnotations(root) {
+  const r = root || document.body;
+
+  // 1. Badges
+  for (const badge of r.querySelectorAll(".rmp-badge")) badge.remove();
+
+  // 2. Unwrap .atlas-rmp-wrap (preserve the original anchor in place)
+  for (const wrap of r.querySelectorAll(".atlas-rmp-wrap")) {
+    const parent = wrap.parentElement;
+    if (!parent) { wrap.remove(); continue; }
+    while (wrap.firstChild) parent.insertBefore(wrap.firstChild, wrap);
+    wrap.remove();
+  }
+
+  // 3. Annotation markers on source elements
+  for (const el of r.querySelectorAll("[" + BADGE_ATTR + "]")) {
+    el.removeAttribute(BADGE_ATTR);
+  }
+
+  // 4. Browse Courses enrichment chrome (lists, empty states, loading rows)
+  for (const en of r.querySelectorAll(
+    ".atlas-rmp-instructors, .atlas-rmp-instructors-empty, .atlas-rmp-loading"
+  )) {
+    en.remove();
+  }
+
+  // 5. Enrichment markers on cards + queued jobs
+  for (const card of r.querySelectorAll("[" + ATLAS_ENRICH_ATTR + "]")) {
+    card.removeAttribute(ATLAS_ENRICH_ATTR);
+  }
+  enrichQueue.length = 0; // drop any pending fetches; in-flight ones bail via guard
+
+  // 6. Helper classes + data attributes used by applyFiltersToDom
+  const dataAttrs = [
+    "data-hide-closed", "data-hide-wait", "data-hide-empty",
+    "data-below-min", "data-min-best", "data-all-hidden",
+  ];
+  for (const attr of dataAttrs) {
+    for (const el of r.querySelectorAll("[" + attr + "]")) {
+      el.removeAttribute(attr);
+    }
+  }
+  for (const card of r.querySelectorAll(".atlas-rmp-card-empty")) {
+    card.classList.remove("atlas-rmp-card-empty");
+  }
+
+  // 7. Restore inline display we set when hiding all-filtered cards
+  for (const card of r.querySelectorAll("[data-atlas-rmp-display-hide]")) {
+    card.style.display = "";
+    delete card.dataset.atlasRmpDisplayHide;
+  }
+}
+
 // ─── Settings live updates ──────────────────────────────────────────────────
 //
-// Watch chrome.storage for changes to the three filter keys. Pure attribute
-// flips (hide-closed, hide-empty, below-min) only need applyFiltersToDom();
-// changes to the empty-card filter benefit from a re-enrich pass so newly-
-// rendered cards pick up the latest data-attributes too.
+// Filter changes (hide-closed, etc.) only need applyFiltersToDom — pure
+// attribute flips. Page-enable changes are heavier:
+//   • OFF for the current page → strip every injection (removeAllAnnotations)
+//     so the page returns to native instantly without a reload.
+//   • ON for the current page  → re-scan + re-enrich so badges return.
+//   • Other pages' toggles do nothing here; they apply on next visit.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   const watchedFilters = Object.values(SETTING_KEYS);
@@ -1421,17 +1520,29 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (!filterChanged && !pageChanged) return;
 
   loadSettings().then(() => {
+    const currentPageType = detectPageType();
+    const currentPageKey  = currentPageType ? PAGE_ENABLE_KEYS[currentPageType] : null;
+    const currentPageToggleChanged = currentPageKey && changes[currentPageKey];
+
+    if (currentPageToggleChanged) {
+      const enabled = SETTINGS.enabledPages?.[currentPageType] !== false;
+      if (!enabled) {
+        // Toggled OFF for the page we're on — strip everything and stop.
+        removeAllAnnotations(document.body);
+        return;
+      }
+      // Toggled ON — fall through to re-scan + re-enrich below.
+    }
+
     applyFiltersToDom();
-    // Re-run enrichment so any newly-visible cards get the current settings.
+
     if (changes[SETTING_KEYS.hideEmptyCards]) {
       invalidateAllEnrichments();
       debouncedEnrich();
     }
-    // If a per-page toggle flipped on, re-scan so newly-enabled pages get
-    // their badges back without a reload.
+
     if (pageChanged) {
       scan(document.body);
-      // Atlas's enricher is gated; force a re-run too.
       invalidateAllEnrichments();
       debouncedEnrich();
     }
