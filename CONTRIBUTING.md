@@ -1,92 +1,107 @@
 # Contributing to Atlas × RMP
 
-## How Atlas's APIs work
+Atlas × RMP is a thin layer over a stack of UMich and RMP web surfaces, none of which expose stable contracts. Most contributions fall into one of three buckets: **fixing a selector that drifted**, **expanding the matcher to handle a new name shape**, or **adding support for a new Atlas page**.
 
-Atlas exposes three data surfaces the extension uses:
+Before contributing, please skim the **"Heads up: this is a fragile, unofficial plugin"** section in the README — every change you make is going to interact with at least one undocumented external system.
 
-| Surface | How it's used |
-|---------|---------------|
-| `course-instructors.json` | Returns the instructor list for a given course code and term. The content script fetches this to get canonical instructor names before querying RMP. |
-| `section-table-data` + `course_id` query param | Returns section rows (section number, status, days/time, location, instructor) for the Browse Courses card view. The extension reads this to render the per-card section breakdown. |
-| Atlas DOM selectors (search-results page) | The extension reads rendered HTML on the course search results page, instructor profile page, Schedule Builder, and LSA Course Guide using CSS selectors defined in `src/content.js`. |
+## How the moving parts fit together
 
-## How to discover selectors for a new page type
+| Surface | What we use it for | Failure mode |
+|---|---|---|
+| Atlas DOM (`atlas.ai.umich.edu`) | CSS selectors in `src/content.js` SELECTORS map find instructor name elements per page type | Atlas restructures markup → no badges appear |
+| Atlas section-table-data API (`/api/section-table-data/{COURSE}/{TERM}/?course_id=…`) | Per-section status, seats, days/time, location, and instructor list for Browse Courses cards | Endpoint changes shape → "Loading instructors..." stays forever |
+| LSA Course Guide HTML (`webapps.lsa.umich.edu/cg/`) | Cross-references waitlist counts, since Atlas's API lacks them. Parsed via DOMParser in content.js | Auth via Shibboleth/Okta expires; markup uses `.clsschedulerow` and `xs_label` anchors which could change |
+| RateMyProfessors GraphQL (`www.ratemyprofessors.com/graphql`) | School lookup once, then a per-prof teacher-search query | RMP rotates auth token (extension shows red "auth expired" badge); schema changes silently |
 
-When Atlas updates its markup or you want to support a new page, spend ~15 minutes with DevTools:
+Service worker (`src/background.js`) proxies CG fetches because content scripts at `atlas.ai.umich.edu` can't reach `webapps.lsa.umich.edu` without CORS errors. RMP queries also go through the worker, both for cross-origin reasons and to centralize auth-state handling.
 
-1. Load the extension unpacked (`chrome://extensions` → **Load unpacked**).
-2. Navigate to the target Atlas page while logged in via UMich SSO + Okta.
-3. Open DevTools (F12) → **Console** tab.
-4. Run this discovery query to find candidate instructor elements:
+## Re-discovering selectors
+
+When a page type stops badging:
+
+1. Load the extension unpacked at `chrome://extensions` (toggle Developer Mode → **Load unpacked** → select the `atlas-rmp/` folder).
+2. Navigate to the broken Atlas page while logged in via UMich SSO + Okta.
+3. Open DevTools (`F12`) → **Console**.
+4. Run a discovery query to find candidate instructor elements:
    ```js
    document.querySelectorAll(
      '[class*="instructor"], [class*="prof"], [class*="teacher"], ' +
      'a[href*="/instructor/"], a[href*="/professor/"]'
    )
    ```
-5. Inspect the returned elements. Identify which ones contain plain instructor names.
-6. Note the working selector and name format (e.g., `"Last, First"` vs `"First Last"`, presence of titles like "Dr.").
-7. Record findings in `selectors.md` with the page URL pattern and date observed.
-8. Update the `SELECTORS` map in `src/content.js` (see next section).
+5. Inspect the returned nodes. Identify which one consistently wraps a plain instructor name (not a heading like "Course Instructors" or a "Bookmark" button).
+6. Note the working selector and the name format (`"Last, First"` vs `"First Last"`, presence of titles like "Dr.", screen-reader duplicates, etc.).
+7. Update the matching entry in `SELECTORS` in `src/content.js`.
+8. Reload the extension at `chrome://extensions` and verify the smoke test below.
 
-Re-run the smoke test (10 known professors, listed below) to verify zero false positives before opening a PR.
+If the page is genuinely new (Atlas just shipped it), follow the same procedure and add a new entry to `SELECTORS`, plus a branch in `detectPageType()` for the URL pattern, plus a per-page enable toggle in `popup.html` / `options.html` / `popup.js` / `options.js` (search for `setting:enableOnSearchResults` for the existing pattern).
 
-## Adding a new page type
+## RMP gotchas
 
-1. Open `src/content.js` and locate the `SELECTORS` map near the top of the file.
-2. Add a new entry keyed by a descriptive page-type name:
-   ```js
-   SELECTORS['my-new-page'] = {
-     match: /atlas\.ai\.umich\.edu\/my-path/,   // URL pattern
-     query: '.the-discovered-css-selector',      // selector from Step 4 above
-     nameFormat: 'first-last',                   // or 'last-first'
-   };
-   ```
-3. Add a corresponding handler in the `handlePage()` function that calls `injectBadges()` with the new selector.
-4. Run the smoke test (see Testing below).
-5. Open a pull request with the new selector documented in `selectors.md`.
+**The default token (`Basic dGVzdDp0ZXN0`)** is RMP's own public test credential — base64 of `test:test`. It rotates every few months. The Options page is the canonical place to override it.
 
-## RMP GraphQL gotchas
+**Cookie-size limits.** The extension stores everything in `chrome.storage.local` (cache + settings). RMP fetches set `credentials: "omit"` because including session cookies pushes the request past nginx's header limit (returns `400 Request Header Or Cookie Too Large`).
 
-**`Basic dGVzdDp0ZXN0` token history**
-RateMyProfessor's public GraphQL endpoint (`https://www.ratemyprofessors.com/graphql`) historically required only this static token. It is base64 for `test:test` — a placeholder credential the RMP frontend shipped publicly. The token has occasionally rotated; when it does, the background service worker will receive a 401 and set the "auth expired" badge. See the README for the refresh procedure.
+**Schema drift.** RMP's GraphQL is undocumented. Fields the extension queries:
+- `teacher { id, legacyId, firstName, lastName, department, avgRating, avgDifficulty, numRatings, wouldTakeAgainPercent, school { id, name } }`
 
-**Cookie size limits**
-The extension uses `chrome.storage.local` (not cookies) for its 7-day cache. Do not attempt to store RMP responses in document cookies — Atlas pages set strict `SameSite` and size constraints that will silently drop oversized values.
+If ratings stop returning data, capture a fresh `graphql` request from rmp.com in DevTools → Network and diff the response shape against `TEACHER_SEARCH_QUERY` in `src/lib/rmp.js`. Update the query fields and bump the manifest version.
 
-**Schema drift**
-RMP's GraphQL schema is undocumented and has changed without notice. The fields the extension queries are:
-- `teacher { id, firstName, lastName, avgRating, numRatings, wouldTakeAgainPercent, avgDifficulty, department }`
-
-If ratings stop returning data, open DevTools → Network, capture a fresh RMP GraphQL response in your browser, and diff it against the query in `src/lib/rmp.js`. Update the query fields to match the live schema and bump the extension version.
+**School scoping.** The teacher search is scoped to the UMich Ann Arbor school ID; on a miss the worker re-queries without a school filter and accepts any result whose school name starts with `University of Michigan` (covers Dearborn / Flint). EMU, MSU, and other Michigan-named schools are explicitly excluded.
 
 ## Testing
 
-**Smoke test — 10 known professors**
+There are no automated tests — every check is manual against real Atlas data.
 
-Pass bar: 8/10 must resolve to the correct RMP profile with zero false positives.
+**Smoke test (10 known professors)**
 
-For each professor, find their name on Atlas (course search or profile page) and verify:
-- Badge rating matches the rating shown at `ratemyprofessors.com`
-- No ⚠️ low-confidence glyph (or if present, the matched name is correct)
-- No badge shown for a different professor with a similar name
+Pass bar: 8/10 should resolve to the correct RMP profile, zero false positives.
 
 | # | Professor | Department | Notes |
-|---|-----------|------------|-------|
-| 1 | Wes Weimer | CSE | High-volume, reliable match |
+|---|---|---|---|
+| 1 | Wes Weimer | CSE | High-volume; nickname → canonical via NICKS map |
 | 2 | J. Alex Halderman | CSE | Middle initial in Atlas name |
-| 3 | Ji Zhu | Statistics | Short name, watch for collisions |
+| 3 | Ji Zhu | Statistics | Short name, watch for surname collisions |
 | 4 | Stephen DeBacker | Mathematics | CamelCase surname |
 | 5 | Andrew Snowden | Mathematics | |
 | 6 | Smadar Karni | Mathematics | |
 | 7 | Yuekai Sun | Statistics | |
-| 8 | Ya'acov Ritov | Statistics | Apostrophe in name — encoding edge case |
+| 8 | Ya'acov Ritov | Statistics | Apostrophe — encoding edge case |
 | 9 | Sarah Koch | Mathematics | |
 | 10 | Marwa Houalla | CSE / SI | Newer instructor; miss is acceptable |
 
-**How to run**
+**Procedure**
 
-1. Load the extension unpacked at `chrome://extensions`.
-2. Log into Atlas via UMich SSO + Okta.
-3. For each professor above, search their name on Atlas and record badge vs. actual RMP rating.
-4. Open the extension's service worker DevTools (`chrome://extensions` → "service worker") and check the console for any errors or low-confidence warnings.
+1. Load the extension unpacked.
+2. Sign into Atlas via UMich SSO + Okta.
+3. For each professor, search them on Atlas, verify badge rating against `ratemyprofessors.com`, and check the service worker DevTools (`chrome://extensions` → "service worker") for any unexpected warnings.
+4. Click the toolbar popup → **Clear cache** between runs if you're debugging the matcher, since negative results stick around for 7 days.
+
+**Extra spot-checks worth running before a release**
+
+- Browse Courses with cache cold (Clear cache, then load `/courses/?subject=EECS`) — verify the section-list cards render with status / seats / waitlist / days/time/location.
+- Toggle "Hide closed sections" + "Hide wait-list sections" with the page already loaded; cards whose sections are entirely filtered should collapse, not leave empty frames.
+- Toggle each "Active on" page off then back on while sitting on that page; badges should disappear instantly and reappear instantly without a reload.
+- Trigger a CG re-auth: visit Browse Courses, manually expire your CG cookie (or wait), then reload. The orange "LSA Course Guide auth expired" alert should appear in the popup, clicking re-auth should open CG, and re-opening the popup after re-authing should clear the alert.
+
+## Code layout
+
+```
+atlas-rmp/
+├── manifest.json          # MV3 manifest, host_permissions, content scripts
+├── src/
+│   ├── background.js      # Service worker. RMP LOOKUP + FETCH_CG message handlers,
+│   │                      # toolbar badge sync, school-ID resolution.
+│   ├── content.js         # Content script. Selectors, MutationObserver, badge
+│   │                      # rendering, Browse Courses enrichment, filters,
+│   │                      # toggle-driven cleanup.
+│   ├── inject.css         # Badge + section-row styles.
+│   ├── popup.{html,js}    # Toolbar popup UI.
+│   ├── options.{html,js}  # Full Options page (token input, prefs, page toggles, cache).
+│   └── lib/
+│       ├── rmp.js         # GraphQL client, auth handling, cached token.
+│       ├── nameMatch.js   # NICKS map, splitName, normalize, pickBestMatch.
+│       └── cache.js       # 7-day TTL via chrome.storage.local.
+├── icons/                 # Extension icons.
+└── selectors notes        # Live in code comments next to each SELECTORS entry.
+```
