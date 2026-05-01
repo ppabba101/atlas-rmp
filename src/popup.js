@@ -57,17 +57,26 @@ function persistPageToggle(name, checked) {
 
 // ─── CG auth banner ─────────────────────────────────────────────────────────
 
-function loadCgAuthCard() {
+// One ping per popup open. Without this gate, loadCgAuthCard fires a ping,
+// which (if CG auth is genuinely expired) makes background.js write a fresh
+// `cg:authNeeded` timestamp, which fires storage.onChanged → loadCgAuthCard
+// → another ping → … Each iteration is a real CG fetch + storage write,
+// repeating for the popup's lifetime. The popup is destroyed when the user
+// dismisses it, so this module-scope flag naturally resets between opens.
+let cgAuthPinged = false;
+
+function loadCgAuthCard(opts = {}) {
+  const { ping = false } = opts;
   chrome.storage.local.get(CG_AUTH_KEY, (result) => {
     const needed = result?.[CG_AUTH_KEY];
     const card = $("cg-auth-card");
     if (card) card.style.display = (needed && needed.ts) ? "block" : "none";
-    // If the flag is set when the popup opens, ping CG once to refresh state.
-    // After Okta re-auth in another tab the user has no obvious way to clear
-    // the flag without visiting Browse Courses; the background FETCH_CG
-    // handler clears the flag on any non-Shibboleth response, and the
-    // storage.onChanged listener below will hide the card automatically.
-    if (needed && needed.ts) pingCgAuth();
+    // Only ping when the caller explicitly asks for it (initial popup open),
+    // not on storage-driven re-renders. Even then, only if the flag is set.
+    if (ping && needed && needed.ts && !cgAuthPinged) {
+      cgAuthPinged = true;
+      pingCgAuth();
+    }
   });
 }
 
@@ -147,7 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPageToggles();
   loadTokenStatus();
   loadCacheCount();
-  loadCgAuthCard();
+  loadCgAuthCard({ ping: true }); // initial open: refresh CG state if expired
 
   $("cg-reauth-btn").addEventListener("click", () => {
     const cgUrl = "https://webapps.lsa.umich.edu/cg/";
