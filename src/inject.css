@@ -225,7 +225,10 @@
   display: none;
 }
 
-/* Hide entire cards when every section is filtered out by current settings. */
+/* Hide entire cards when every section is filtered out by current settings.
+ * !important is required because Atlas's Vue framework may set inline display
+ * styles on .bookmarkable-card during pagination/render, which would otherwise
+ * win on specificity. */
 .bookmarkable-card[data-all-hidden="true"] {
-  display: none;
+  display: none !important;
 }
