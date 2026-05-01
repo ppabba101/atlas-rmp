@@ -254,6 +254,13 @@ async function isAuthFailed() {
  * @param {boolean} authFailed - Whether global auth-fail state is active
  * @returns {string} HTML string for the badge span
  */
+/**
+ * HTML-escape a value for safe interpolation into HTML strings (text content
+ * AND attribute values). Used everywhere we build markup with template
+ * literals — every interpolated value MUST pass through this, even numeric
+ * fields, since defense-in-depth is cheap and a future schema change to RMP
+ * could turn a "safe" field into untrusted text.
+ */
 function esc(s) {
   if (s == null) return "";
   return String(s).replace(/[&<>"']/g, c => ({
@@ -262,7 +269,7 @@ function esc(s) {
 }
 
 function badgeHTML(result, authFailed) {
-  // Improvement 3: auth-fail badge takes priority
+  // Auth-fail badge takes priority over any actual rating.
   if (authFailed || (result && result.reason === "auth-failed")) {
     return `<span class="rmp-badge rmp-auth-fail" title="RMP auth token expired. Click the extension icon to update your token in Options.">` +
       `RMP auth expired — update token in Options</span>`;
@@ -292,13 +299,13 @@ function badgeHTML(result, authFailed) {
 
   const warnGlyph =
     result.confidence != null && result.confidence < 0.95
-      ? ` <span class="rmp-warn" title="Fuzzy name match (confidence: ${(result.confidence * 100).toFixed(0)}%)">⚠️</span>`
+      ? ` <span class="rmp-warn" title="Fuzzy name match (confidence: ${esc((result.confidence * 100).toFixed(0))}%)">⚠️</span>`
       : "";
 
   return (
     `<a class="rmp-badge ${cls}" href="${url}" target="_blank" rel="noopener" ` +
-    `title="${esc(result.firstName)} ${esc(result.lastName)} — ${numRatings} ratings">` +
-    `${ratingText}${warnGlyph}</a>`
+    `title="${esc(result.firstName)} ${esc(result.lastName)} — ${esc(numRatings)} ratings">` +
+    `${esc(ratingText)}${warnGlyph}</a>`
   );
 }
 
@@ -960,7 +967,7 @@ function renderSectionList(card, sections, nameToResult, authFailed) {
 
 /**
  * Render a "loading" placeholder while the detail-page fetch + lookups are in
- * flight. Replaced by renderInstructorList() once results arrive.
+ * flight. Replaced by renderSectionList() once results arrive.
  */
 function renderLoadingState(card) {
   const target = card.querySelector(".card-content") ?? card;
@@ -1310,7 +1317,7 @@ function scan(root) {
   }
 }
 
-// ─── MutationObserver (Improvement 2) ───────────────────────────────────────
+// ─── MutationObserver ───────────────────────────────────────────────────────
 
 let debounceTimer = null;
 
