@@ -333,6 +333,33 @@ function badgeHTML(result, authFailed) {
 // ─── Annotation ─────────────────────────────────────────────────────────────
 
 /**
+ * Choose where to insert the badge. When the matched element wraps additional
+ * structure (Browse Instructors: the card-wrapping <a> contains a heading and
+ * possibly a department blurb), `el.insertAdjacentHTML("afterend", ...)` puts
+ * the badge after the full-width link where flex / block layout pushes it to
+ * the far right of the card. Anchoring on the deepest descendant whose text
+ * equals the name keeps the badge flush against the visible name. No-op when
+ * el is already a leaf (course-detail / Schedule Builder / dashboard links).
+ *
+ * @param {Element} el
+ * @param {string} name
+ * @returns {Element}
+ */
+function findBadgeAnchor(el, name) {
+  if (!name || el.children.length === 0) return el;
+  const target = name.trim();
+  let best = null;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT);
+  let node = walker.nextNode();
+  while (node) {
+    const t = (node.textContent || "").trim();
+    if (t === target) best = node; // depth-first walk → last match is deepest
+    node = walker.nextNode();
+  }
+  return best || el;
+}
+
+/**
  * Annotate a single name element: send LOOKUP to background, inject badge.
  *
  * @param {Element} el
@@ -397,7 +424,7 @@ async function annotate(el) {
 
   if (authFailed) {
     el.setAttribute(BADGE_ATTR, name);
-    el.insertAdjacentHTML("afterend", badgeHTML(null, true));
+    findBadgeAnchor(el, name).insertAdjacentHTML("afterend", badgeHTML(null, true));
     return;
   }
 
@@ -429,7 +456,7 @@ async function annotate(el) {
   el.setAttribute(BADGE_ATTR, name);
 
   const newAuthFailed = result?.reason === "auth-failed" || (await isAuthFailed());
-  el.insertAdjacentHTML("afterend", badgeHTML(result, newAuthFailed));
+  findBadgeAnchor(el, name).insertAdjacentHTML("afterend", badgeHTML(result, newAuthFailed));
 }
 
 // ─── Course harvesting (Workstream B Path b) ────────────────────────────────
