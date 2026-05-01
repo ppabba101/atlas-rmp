@@ -218,6 +218,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("save-token").addEventListener("click", saveToken);
   $("test-token").addEventListener("click", testToken);
+  $("toggle-token-visibility").addEventListener("click", () => {
+    const input = $("token-input");
+    const button = $("toggle-token-visibility");
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    button.textContent = showing ? "Show" : "Hide";
+  });
   $("save-prefs").addEventListener("click", savePrefs);
   $("save-pages").addEventListener("click", savePageToggles);
   $("clear-cache").addEventListener("click", clearCache);
