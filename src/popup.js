@@ -83,7 +83,22 @@ function loadCgAuthCard() {
     const needed = result?.[CG_AUTH_KEY];
     const card = $("cg-auth-card");
     if (card) card.style.display = (needed && needed.ts) ? "block" : "none";
+    // If the flag is set when the popup opens, ping CG once to refresh state.
+    // After Okta re-auth in another tab the user has no obvious way to clear
+    // the flag without visiting Browse Courses; the background FETCH_CG
+    // handler clears the flag on any non-Shibboleth response, and the
+    // storage.onChanged listener below will hide the card automatically.
+    if (needed && needed.ts) pingCgAuth();
   });
+}
+
+function pingCgAuth() {
+  try {
+    chrome.runtime.sendMessage(
+      { type: "FETCH_CG", url: "https://webapps.lsa.umich.edu/cg/" },
+      () => { /* no-op — flag handling lives on the background side */ }
+    );
+  } catch (_) { /* extension context may be invalidating; harmless */ }
 }
 
 // ─── Token status ───────────────────────────────────────────────────────────

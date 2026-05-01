@@ -264,11 +264,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: false, status: res.status, finalUrl: res.url, body, error: "cg-auth-redirect" });
         return;
       }
-      // Successful fetch: if the body contains the section table marker, CG
-      // auth is working — clear any stale auth-needed flag.
-      if (body.indexOf("clsschedulerow") !== -1) {
-        chrome.storage.local.remove("cg:authNeeded");
-      }
+      // No redirect to Shibboleth ⇒ CG auth is working. Clear any stale flag
+      // unconditionally — previously we required `clsschedulerow` in the body
+      // (only present on detail pages with section tables), which left the
+      // flag stuck after re-authentication if anything else was pinged first.
+      chrome.storage.local.remove("cg:authNeeded");
       sendResponse({ ok: res.ok, status: res.status, finalUrl: res.url, body });
     })
     .catch((e) => {
