@@ -4,7 +4,3 @@ node_modules/
 .vscode/
 .idea/
 .omc/
-
-# Trademarked reference assets used during icon design — do not commit.
-icons/atlas-*.svg
-icons/rate-my-professor.*
